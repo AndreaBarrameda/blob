@@ -8,6 +8,7 @@ struct DashboardView: View {
     @State private var inputText = ""
     @State private var isLoading = false
     @State private var currentTrack = "Nothing playing"
+    @State private var showImportSection = false
 
     private let openAI = OpenAIClient()
     private let spotify = SpotifyController()
@@ -62,6 +63,30 @@ struct DashboardView: View {
             }
             .padding(10)
             .background(Color(red: 0.98, green: 0.98, blue: 0.99))
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
+            // Import memories section
+            VStack(spacing: 0) {
+                Button(action: { showImportSection.toggle() }) {
+                    HStack {
+                        Image(systemName: showImportSection ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                        Text("Import ChatGPT Memories")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                    .foregroundColor(.blue)
+                    .padding(10)
+                    .background(Color(red: 0.98, green: 0.98, blue: 1.0))
+                }
+                .buttonStyle(.plain)
+
+                if showImportSection {
+                    ImportMemoriesView(memory: memory, openAI: openAI)
+                        .border(Color.gray.opacity(0.3), width: 0.5)
+                }
+            }
             .border(Color.gray.opacity(0.3), width: 0.5)
 
             // Spotify controls
@@ -237,7 +262,7 @@ struct DashboardView: View {
                     .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
 
                 // Clean up common ending words
-                var songName = afterKeyword
+                let songName = afterKeyword
                     .replacingOccurrences(of: " please", with: "")
                     .replacingOccurrences(of: " now", with: "")
                     .trimmingCharacters(in: .whitespaces)

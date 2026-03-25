@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 struct Memory: Codable {
     let fact: String
@@ -6,9 +7,9 @@ struct Memory: Codable {
     let category: String  // "preference", "fact", "interest", etc.
 }
 
-class BlobMemory {
+class BlobMemory: ObservableObject {
+    @Published var memories: [Memory] = []
     private let memoryFile = "/Users/andreabarrameda/VirtualAssistant/.blob_memory.json"
-    private var memories: [Memory] = []
 
     init() {
         loadMemories()
