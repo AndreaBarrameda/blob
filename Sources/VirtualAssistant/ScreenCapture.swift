@@ -7,17 +7,21 @@ class ScreenCapture {
 
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        task.arguments = ["-x", "-t", "jpg", "-"]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
+        // Capture entire screen as JPEG to /tmp, then read it
+        let tempFile = "/tmp/blob_screen_\(UUID().uuidString).jpg"
+        task.arguments = ["-x", "-t", "jpg", tempFile]
 
         do {
             try task.run()
             task.waitUntilExit()
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return data.isEmpty ? nil : data
+            // Read the file
+            let fileData = try Data(contentsOf: URL(fileURLWithPath: tempFile))
+
+            // Clean up temp file
+            try? FileManager.default.removeItem(atPath: tempFile)
+
+            return fileData.isEmpty ? nil : fileData
         } catch {
             print("❌ Screen capture error: \(error)")
             return nil
