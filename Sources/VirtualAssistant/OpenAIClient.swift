@@ -3,6 +3,7 @@ import Foundation
 class OpenAIClient {
     let apiKey: String
     private let baseURL = "https://api.openai.com/v1"
+    var memory: BlobMemory?
 
     init() {
         // Try to get API key from environment
@@ -27,13 +28,16 @@ class OpenAIClient {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        let memorySummary = memory?.getMemorySummary() ?? ""
+        let systemPrompt = "You are Blob, a cute AI assistant that can see the user's screen. You can see what they're doing and ask helpful, curious questions about it. Keep responses short (1-2 sentences). Be playful and observant! \(memorySummary)"
+
         let payload: [String: Any] = [
             "model": "gpt-4o",
             "max_tokens": 150,
             "messages": [
                 [
                     "role": "system",
-                    "content": "You are Blob, a cute AI assistant that can see the user's screen. You can see what they're doing and ask helpful, curious questions about it. Keep responses short (1-2 sentences). Be playful and observant!"
+                    "content": systemPrompt
                 ],
                 [
                     "role": "user",
@@ -91,12 +95,15 @@ class OpenAIClient {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        let memorySummary = memory?.getMemorySummary() ?? ""
+        let systemPrompt = "You are a cute and playful virtual assistant named Blob. Keep responses short (1-2 sentences) and friendly. You can see the user's system (battery, apps running). You can control Spotify - open songs, skip, pause. Be helpful and fun! When user asks to play something, open it in Spotify and say something like 'Found it! Opening X in Spotify - go ahead and hit play!' 🎵 \(memorySummary)"
+
         let payload: [String: Any] = [
             "model": "gpt-3.5-turbo",
             "messages": [
                 [
                     "role": "system",
-                    "content": "You are a cute and playful virtual assistant named Blob. Keep responses short (1-2 sentences) and friendly. You can see the user's system (battery, apps running). You can control Spotify - open songs, skip, pause. Be helpful and fun! When user asks to play something, open it in Spotify and say something like 'Found it! Opening X in Spotify - go ahead and hit play!' 🎵"
+                    "content": systemPrompt
                 ],
                 [
                     "role": "user",

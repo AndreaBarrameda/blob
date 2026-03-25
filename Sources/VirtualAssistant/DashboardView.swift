@@ -11,6 +11,7 @@ struct DashboardView: View {
 
     private let openAI = OpenAIClient()
     private let spotify = SpotifyController()
+    private let memory = BlobMemory()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -169,6 +170,7 @@ struct DashboardView: View {
         }
         .onAppear {
             updateCurrentTrack()
+            openAI.memory = memory
         }
     }
 
@@ -195,6 +197,10 @@ struct DashboardView: View {
                 messages.append(ChatMessage(text: response, isUser: false))
                 isLoading = false
                 updateCurrentTrack()
+
+                // Extract memories from conversation
+                let conversation = "\(userMessage) -> \(response)"
+                memory.extractMemories(from: conversation, usingOpenAI: openAI) {}
             }
         }
     }
