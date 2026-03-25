@@ -190,8 +190,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Close previous bubble
         speechBubbleWindow?.orderOut(nil)
 
-        // Create new bubble
-        let bubble = SpeechBubbleWindow(text: text, originPoint: nearPoint)
+        // Get blob's current actual position
+        let blobFrame = blobWindow?.frame ?? NSRect(x: 100, y: 500, width: 120, height: 120)
+
+        // Create new bubble positioned directly above blob
+        let bubble = SpeechBubbleWindow(text: text, originPoint: blobFrame.origin)
         bubble.makeKeyAndOrderFront(nil)
         bubble.orderFrontRegardless()
         self.speechBubbleWindow = bubble
