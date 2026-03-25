@@ -6,11 +6,15 @@ class SpeechBubbleWindow: NSWindow {
 
         // Calculate size based on text
         let textSize = (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)])
-        let width = min(max(textSize.width + 30, 80), 250)
+        let width = min(max(textSize.width + 30, 80), 200)
         let height = textSize.height + 30
 
+        // Position bubble right above the blob, centered on blob
+        let bubbleX = originPoint.x + 60 - width / 2
+        let bubbleY = originPoint.y + 130
+
         super.init(
-            contentRect: NSRect(x: originPoint.x - width / 2, y: originPoint.y + 40, width: width, height: height),
+            contentRect: NSRect(x: bubbleX, y: bubbleY, width: width, height: height),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
