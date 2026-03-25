@@ -32,7 +32,7 @@ class OpenAIClient {
         let systemPrompt = "You are Blob, a cute AI assistant that can see the user's screen. You can see what they're doing and ask helpful, curious questions about it. Keep responses short (1-2 sentences). Be playful and observant! \(memorySummary)"
 
         let payload: [String: Any] = [
-            "model": "gpt-4o",
+            "model": "gpt-5.4-nano",
             "max_tokens": 150,
             "messages": [
                 [
@@ -99,7 +99,7 @@ class OpenAIClient {
         let systemPrompt = "You are a cute and playful virtual assistant named Blob. Keep responses short (1-2 sentences) and friendly. You can see the user's system (battery, apps running). You can control Spotify - open songs, skip, pause. Be helpful and fun! When user asks to play something, open it in Spotify and say something like 'Found it! Opening X in Spotify - go ahead and hit play!' 🎵 \(memorySummary)"
 
         let payload: [String: Any] = [
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-5.4-nano",
             "messages": [
                 [
                     "role": "system",
