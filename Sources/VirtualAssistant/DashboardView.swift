@@ -7,8 +7,10 @@ struct DashboardView: View {
     ]
     @State private var inputText = ""
     @State private var isLoading = false
+    @State private var currentTrack = "Nothing playing"
 
     private let openAI = OpenAIClient()
+    private let spotify = SpotifyController()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -59,6 +61,56 @@ struct DashboardView: View {
             }
             .padding(10)
             .background(Color(red: 0.98, green: 0.98, blue: 0.99))
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
+            // Spotify controls
+            VStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "music.note")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                    Text(currentTrack)
+                        .font(.caption2)
+                        .lineLimit(2)
+                    Spacer()
+                }
+
+                HStack(spacing: 6) {
+                    Button(action: { spotify.previousTrack() }) {
+                        Image(systemName: "backward.fill")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.green)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { spotify.playPause() }) {
+                        Image(systemName: "play.fill")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.green)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { spotify.nextTrack() }) {
+                        Image(systemName: "forward.fill")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.green)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+            }
+            .padding(10)
+            .background(Color(red: 0.98, green: 1.0, blue: 0.98))
             .border(Color.gray.opacity(0.3), width: 0.5)
 
             // Chat
@@ -115,6 +167,15 @@ struct DashboardView: View {
             }
             .padding(10)
         }
+        .onAppear {
+            updateCurrentTrack()
+        }
+    }
+
+    private func updateCurrentTrack() {
+        spotify.getCurrentTrack { track in
+            currentTrack = track.isEmpty ? "Nothing playing" : track
+        }
     }
 
     private func sendMessage() {
@@ -125,12 +186,30 @@ struct DashboardView: View {
         inputText = ""
         isLoading = true
 
+        // Check for Spotify commands
+        handleSpotifyCommands(in: userMessage)
+
         // Call OpenAI API
         openAI.chat(message: userMessage) { response in
             DispatchQueue.main.async {
                 messages.append(ChatMessage(text: response, isUser: false))
                 isLoading = false
+                updateCurrentTrack()
             }
+        }
+    }
+
+    private func handleSpotifyCommands(in message: String) {
+        let lower = message.lowercased()
+
+        if lower.contains("play") && !lower.contains("playlist") {
+            spotify.play()
+        } else if lower.contains("pause") {
+            spotify.pause()
+        } else if lower.contains("next") || lower.contains("skip") {
+            spotify.nextTrack()
+        } else if lower.contains("previous") || lower.contains("back") {
+            spotify.previousTrack()
         }
     }
 }

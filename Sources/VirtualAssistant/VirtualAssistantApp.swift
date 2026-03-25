@@ -15,6 +15,9 @@ struct VirtualAssistantApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var blobWindow: NSWindow?
     var dashboardWindow: NSPanel?
+    var speechBubbleWindow: NSWindow?
+    private let openAI = OpenAIClient()
+    private let systemMonitor = SystemMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide from dock
@@ -55,6 +58,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak blobWindow] _ in
             blobWindow?.orderFrontRegardless()
         }
+
+        // Autonomous speech - blob thinks out loud every 8-15 seconds
+        startAutonomousSpeech(blobWindowFrame: blobWindow.frame)
 
         // Listen for blob tap
         NotificationCenter.default.addObserver(
@@ -103,5 +109,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
+    }
+
+    private func startAutonomousSpeech(blobWindowFrame: NSRect) {
+        Timer.scheduledTimer(withTimeInterval: Double.random(in: 8...15), repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+
+            // Generate random thoughts based on system state
+            let prompts = [
+                "Say something fun and short (max 8 words) about your day",
+                "Make a brief witty comment (max 8 words) about something you observe",
+                "Say a short philosophical thought (max 8 words)",
+                "Tell a very short joke (max 8 words)",
+                "Say something encouraging (max 8 words)",
+                "Share a random fact briefly (max 8 words)"
+            ]
+
+            let randomPrompt = prompts.randomElement() ?? "Say something!"
+            let batteryInfo = "The user's battery is at \(self.systemMonitor.batteryLevel)%."
+            let appsInfo = "They have \(self.systemMonitor.runningApps.count) apps open."
+
+            let fullPrompt = "\(randomPrompt) \(batteryInfo) \(appsInfo) Keep it adorable and brief!"
+
+            self.openAI.chat(message: fullPrompt) { [weak self] response in
+                DispatchQueue.main.async {
+                    self?.showSpeechBubble(text: response, nearPoint: blobWindowFrame.origin)
+                }
+            }
+        }
+    }
+
+    private func showSpeechBubble(text: String, nearPoint: NSPoint) {
+        // Close previous bubble
+        speechBubbleWindow?.orderOut(nil)
+
+        // Create new bubble
+        let bubble = SpeechBubbleWindow(text: text, originPoint: nearPoint)
+        bubble.makeKeyAndOrderFront(nil)
+        bubble.orderFrontRegardless()
+        self.speechBubbleWindow = bubble
+
+        // Hide bubble after 4 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak bubble] in
+            bubble?.orderOut(nil)
+        }
     }
 }
