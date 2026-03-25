@@ -7,9 +7,9 @@ class ScreenCapture {
 
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        // Capture entire screen as compressed JPEG
-        let tempFile = "/tmp/blob_screen_\(UUID().uuidString).jpg"
-        task.arguments = ["-x", "-t", "jpg", "-q", "60", tempFile]
+        // Capture entire screen as JPEG
+        let tempFile = "/tmp/blob_screen.jpg"
+        task.arguments = ["-x", "-t", "jpg", tempFile]
 
         do {
             try task.run()
