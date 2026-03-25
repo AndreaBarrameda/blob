@@ -112,29 +112,75 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startAutonomousSpeech(blobWindowFrame: NSRect) {
-        Timer.scheduledTimer(withTimeInterval: Double.random(in: 8...15), repeats: true) { [weak self] _ in
+        Timer.scheduledTimer(withTimeInterval: Double.random(in: 10...20), repeats: true) { [weak self] _ in
             guard let self = self else { return }
 
-            // Generate random thoughts based on system state
-            let prompts = [
-                "Say something fun and short (max 8 words) about your day",
-                "Make a brief witty comment (max 8 words) about something you observe",
-                "Say a short philosophical thought (max 8 words)",
-                "Tell a very short joke (max 8 words)",
-                "Say something encouraging (max 8 words)",
-                "Share a random fact briefly (max 8 words)"
-            ]
+            // Capture screen and make blob aware of what user is doing
+            if let screenBase64 = ScreenCapture.captureScreenAsBase64() {
+                let prompts = [
+                    "Look at the screen and make a fun, short (max 6 words) observation about what they're doing",
+                    "Based on what you see, ask a curious question (max 8 words) about their work",
+                    "See what's on screen and make a playful comment (max 6 words)",
+                    "Look at their screen and give a witty one-liner (max 6 words)",
+                    "See what they're doing and say something encouraging (max 6 words)"
+                ]
 
-            let randomPrompt = prompts.randomElement() ?? "Say something!"
-            let batteryInfo = "The user's battery is at \(self.systemMonitor.batteryLevel)%."
-            let appsInfo = "They have \(self.systemMonitor.runningApps.count) apps open."
+                let randomPrompt = prompts.randomElement() ?? "Say something cute!"
+                let systemPrompt = "You are Blob, a cute AI that can see the user's screen. Look at what they're doing and respond briefly and playfully. Keep it under 8 words. Be adorable!"
 
-            let fullPrompt = "\(randomPrompt) \(batteryInfo) \(appsInfo) Keep it adorable and brief!"
+                // Create request with vision
+                let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("Bearer \(self.openAI.apiKey)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-            self.openAI.chat(message: fullPrompt) { [weak self] response in
-                DispatchQueue.main.async {
-                    self?.showSpeechBubble(text: response, nearPoint: blobWindowFrame.origin)
-                }
+                let payload: [String: Any] = [
+                    "model": "gpt-4-turbo",
+                    "max_tokens": 100,
+                    "messages": [
+                        [
+                            "role": "system",
+                            "content": systemPrompt
+                        ],
+                        [
+                            "role": "user",
+                            "content": [
+                                [
+                                    "type": "image_url",
+                                    "image_url": [
+                                        "url": "data:image/jpeg;base64,\(screenBase64)"
+                                    ]
+                                ],
+                                [
+                                    "type": "text",
+                                    "text": randomPrompt
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+
+                request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+                URLSession.shared.dataTask(with: request) { data, response, error in
+                    if let data = data {
+                        do {
+                            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                               let choices = json["choices"] as? [[String: Any]],
+                               let firstChoice = choices.first,
+                               let message = firstChoice["message"] as? [String: Any],
+                               let content = message["content"] as? String {
+                                let response = content.trimmingCharacters(in: .whitespaces)
+                                DispatchQueue.main.async {
+                                    self.showSpeechBubble(text: response, nearPoint: blobWindowFrame.origin)
+                                }
+                            }
+                        } catch {
+                            print("Vision parsing error: \(error)")
+                        }
+                    }
+                }.resume()
             }
         }
     }

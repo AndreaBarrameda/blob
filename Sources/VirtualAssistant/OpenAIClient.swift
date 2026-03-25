@@ -1,7 +1,7 @@
 import Foundation
 
 class OpenAIClient {
-    private let apiKey: String
+    let apiKey: String
     private let baseURL = "https://api.openai.com/v1"
 
     init() {
