@@ -26,7 +26,7 @@ class OpenAIClient {
             "messages": [
                 [
                     "role": "system",
-                    "content": "You are a cute and playful virtual assistant named Blob. Keep responses short (1-2 sentences) and friendly. You can see the user's system (battery, apps running). Be helpful and fun!"
+                    "content": "You are a cute and playful virtual assistant named Blob. Keep responses short (1-2 sentences) and friendly. You can see the user's system (battery, apps running). You can control Spotify - play songs, skip, pause. Be helpful and fun! When user asks to play something, be excited and confirm you'll play it!"
                 ],
                 [
                     "role": "user",

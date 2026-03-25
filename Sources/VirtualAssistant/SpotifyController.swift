@@ -5,6 +5,11 @@ class SpotifyController {
         runAppleScript("tell application \"Spotify\" to play")
     }
 
+    func playSearch(query: String) {
+        let webAPI = SpotifyWebAPI()
+        webAPI.searchAndPlay(query: query)
+    }
+
     func pause() {
         runAppleScript("tell application \"Spotify\" to pause")
     }

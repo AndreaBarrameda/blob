@@ -202,8 +202,13 @@ struct DashboardView: View {
     private func handleSpotifyCommands(in message: String) {
         let lower = message.lowercased()
 
-        if lower.contains("play") && !lower.contains("playlist") {
-            spotify.play()
+        if lower.contains("play") {
+            // Try to extract song/artist name
+            if let songName = extractSongName(from: message) {
+                spotify.playSearch(query: songName)
+            } else {
+                spotify.play()
+            }
         } else if lower.contains("pause") {
             spotify.pause()
         } else if lower.contains("next") || lower.contains("skip") {
@@ -211,6 +216,33 @@ struct DashboardView: View {
         } else if lower.contains("previous") || lower.contains("back") {
             spotify.previousTrack()
         }
+    }
+
+    private func extractSongName(from message: String) -> String? {
+        let lower = message.lowercased()
+
+        // Keywords that precede song names
+        let playKeywords = ["play", "listen to", "put on", "queue"]
+
+        for keyword in playKeywords {
+            if let range = lower.range(of: keyword) {
+                let afterKeyword = String(message[range.upperBound...])
+                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+
+                // Clean up common ending words
+                var songName = afterKeyword
+                    .replacingOccurrences(of: " please", with: "")
+                    .replacingOccurrences(of: " now", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+
+                if !songName.isEmpty && songName.count > 2 {
+                    return songName
+                }
+            }
+        }
+
+        return nil
     }
 }
 
