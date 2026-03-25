@@ -3,7 +3,7 @@ import AppKit
 
 class SpotifyWebAPI {
     func searchAndPlay(query: String) {
-        // Open Spotify with search - blob will prompt user to click play
+        // Open Spotify search - user can click play from there
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return
         }
