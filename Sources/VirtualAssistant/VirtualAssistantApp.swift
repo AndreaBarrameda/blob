@@ -85,8 +85,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingController = NSHostingController(rootView: dashboardView)
 
         let blobFrame = blobWindow?.frame ?? NSRect(x: 100, y: 500, width: 120, height: 120)
-        let dashboardX = blobFrame.midX - 180
-        let dashboardY = blobFrame.minY - 520
+        // Position dashboard right next to blob (to the right)
+        let dashboardX = blobFrame.maxX + 20
+        let dashboardY = blobFrame.midY - 260
 
         let dashboardPanel = NSPanel(
             contentRect: NSRect(x: dashboardX, y: dashboardY, width: 360, height: 520),
