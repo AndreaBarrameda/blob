@@ -136,7 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
                 let payload: [String: Any] = [
-                    "model": "gpt-4-turbo",
+                    "model": "gpt-4o",
                     "max_tokens": 100,
                     "messages": [
                         [
