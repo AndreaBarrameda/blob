@@ -124,14 +124,21 @@ class BlobNativeView: NSView {
             self?.blink()
         }
 
-        // Mouse tracking
-        let trackingArea = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseMoved, .activeInKeyWindow],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(trackingArea)
+        // Enable mouse tracking at window level
+        DispatchQueue.main.async { [weak self] in
+            self?.window?.acceptsMouseMovedEvents = true
+
+            // Set up tracking area with full bounds
+            if let strongSelf = self {
+                let trackingArea = NSTrackingArea(
+                    rect: strongSelf.bounds,
+                    options: [.mouseMoved, .activeAlways, .inVisibleRect],
+                    owner: strongSelf,
+                    userInfo: nil
+                )
+                strongSelf.addTrackingArea(trackingArea)
+            }
+        }
     }
 
     private func blink() {
