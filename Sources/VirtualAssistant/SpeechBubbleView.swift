@@ -9,11 +9,11 @@ class SpeechBubbleWindow: NSWindow {
         let width = min(max(textSize.width + 30, 80), 200)
         let height = textSize.height + 30
 
-        // Position bubble directly on top of blob
-        // Blob is 120x120, so place bubble just above it
+        // Position bubble above blob with good spacing
+        // Blob is 120x120, so place bubble well above it
         let blobCenterX = originPoint.x + 60
         let bubbleX = blobCenterX - width / 2
-        let bubbleY = originPoint.y + 125  // 120 (blob height) + 5px gap
+        let bubbleY = originPoint.y + 145  // 120 (blob height) + 25px gap for visibility
 
         super.init(
             contentRect: NSRect(x: bubbleX, y: bubbleY, width: width, height: height),
