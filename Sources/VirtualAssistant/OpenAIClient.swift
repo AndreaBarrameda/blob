@@ -14,6 +14,76 @@ class OpenAIClient {
         }
     }
 
+    func chatWithScreenAwareness(message: String, completion: @escaping (String) -> Void) {
+        guard let screenBase64 = ScreenCapture.captureScreenAsBase64() else {
+            // Fallback to regular chat if screen capture fails
+            chat(message: message, completion: completion)
+            return
+        }
+
+        let url = URL(string: "\(baseURL)/chat/completions")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: Any] = [
+            "model": "gpt-4-turbo",
+            "max_tokens": 150,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": "You are Blob, a cute AI assistant that can see the user's screen. You can see what they're doing and ask helpful, curious questions about it. Keep responses short (1-2 sentences). Be playful and observant!"
+                ],
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "image_url",
+                            "image_url": [
+                                "url": "data:image/jpeg;base64,\(screenBase64)"
+                            ]
+                        ],
+                        [
+                            "type": "text",
+                            "text": message
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ OpenAI Error: \(error.localizedDescription)")
+                completion("I'm having trouble seeing right now...")
+                return
+            }
+
+            guard let data = data else {
+                completion("Let me take another look...")
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let choices = json["choices"] as? [[String: Any]],
+                   let firstChoice = choices.first,
+                   let message = firstChoice["message"] as? [String: Any],
+                   let content = message["content"] as? String {
+                    completion(content.trimmingCharacters(in: .whitespaces))
+                } else {
+                    completion("Hmm, let me look again...")
+                }
+            } catch {
+                print("❌ JSON Error: \(error)")
+                completion("I'm confused about what I'm seeing...")
+            }
+        }.resume()
+    }
+
     func chat(message: String, completion: @escaping (String) -> Void) {
         let url = URL(string: "\(baseURL)/chat/completions")!
         var request = URLRequest(url: url)

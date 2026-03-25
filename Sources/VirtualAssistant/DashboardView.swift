@@ -189,8 +189,8 @@ struct DashboardView: View {
         // Check for Spotify commands
         handleSpotifyCommands(in: userMessage)
 
-        // Call OpenAI API
-        openAI.chat(message: userMessage) { response in
+        // Call OpenAI API with screen awareness
+        openAI.chatWithScreenAwareness(message: userMessage) { response in
             DispatchQueue.main.async {
                 messages.append(ChatMessage(text: response, isUser: false))
                 isLoading = false
