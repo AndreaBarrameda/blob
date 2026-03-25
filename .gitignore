@@ -5,3 +5,5 @@
 .idea/
 *.swiftpm
 DerivedData/
+.env
+.env.local

@@ -3,9 +3,12 @@ import SwiftUI
 struct DashboardView: View {
     @StateObject private var systemMonitor = SystemMonitor()
     @State private var messages: [ChatMessage] = [
-        ChatMessage(text: "Hi! What can I help you with?", isUser: false)
+        ChatMessage(text: "Hey! I'm Blob! 🫧 What can I help you with?", isUser: false)
     ]
     @State private var inputText = ""
+    @State private var isLoading = false
+
+    private let openAI = OpenAIClient()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +69,18 @@ struct DashboardView: View {
                             ChatBubble(message: message)
                                 .id(message.id)
                         }
+
+                        if isLoading {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Thinking...")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                                Spacer()
+                            }
+                            .padding()
+                        }
                     }
                     .padding()
                     .onChange(of: messages) { _ in
@@ -88,6 +103,7 @@ struct DashboardView: View {
                     .onSubmit {
                         sendMessage()
                     }
+                    .disabled(isLoading)
 
                 Button(action: sendMessage) {
                     Image(systemName: "paperplane.fill")
@@ -95,7 +111,7 @@ struct DashboardView: View {
                         .foregroundColor(.blue)
                 }
                 .buttonStyle(.plain)
-                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || isLoading)
             }
             .padding(10)
         }
@@ -107,31 +123,15 @@ struct DashboardView: View {
 
         messages.append(ChatMessage(text: userMessage, isUser: true))
         inputText = ""
+        isLoading = true
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            let response = generateResponse(for: userMessage)
-            messages.append(ChatMessage(text: response, isUser: false))
-        }
-    }
-
-    private func generateResponse(for userMessage: String) -> String {
-        let lowerMessage = userMessage.lowercased()
-
-        if lowerMessage.contains("battery") {
-            return "Your battery is at \(systemMonitor.batteryLevel)% and is \(systemMonitor.isCharging ? "charging" : "not charging")."
-        } else if lowerMessage.contains("volume") {
-            if lowerMessage.contains("up") {
-                systemMonitor.increaseVolume()
-                return "I've increased the volume for you!"
-            } else if lowerMessage.contains("down") {
-                systemMonitor.decreaseVolume()
-                return "I've decreased the volume."
+        // Call OpenAI API
+        openAI.chat(message: userMessage) { response in
+            DispatchQueue.main.async {
+                messages.append(ChatMessage(text: response, isUser: false))
+                isLoading = false
             }
-        } else if lowerMessage.contains("apps") {
-            return "You have \(systemMonitor.runningApps.count) apps open."
         }
-
-        return "I understand. How else can I help you?"
     }
 }
 
