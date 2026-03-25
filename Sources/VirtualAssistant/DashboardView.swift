@@ -9,6 +9,7 @@ struct DashboardView: View {
     @State private var isLoading = false
     @State private var currentTrack = "Nothing playing"
     @State private var showImportSection = false
+    @State private var showExportSection = false
 
     private let openAI = OpenAIClient()
     private let spotify = SpotifyController()
@@ -84,6 +85,30 @@ struct DashboardView: View {
 
                 if showImportSection {
                     ImportMemoriesView(memory: memory, openAI: openAI)
+                        .border(Color.gray.opacity(0.3), width: 0.5)
+                }
+            }
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
+            // Export memories section
+            VStack(spacing: 0) {
+                Button(action: { showExportSection.toggle() }) {
+                    HStack {
+                        Image(systemName: showExportSection ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                        Text("Export to ChatGPT")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                    .foregroundColor(.green)
+                    .padding(10)
+                    .background(Color(red: 0.98, green: 1.0, blue: 0.98))
+                }
+                .buttonStyle(.plain)
+
+                if showExportSection {
+                    ExportMemoriesView(memory: memory)
                         .border(Color.gray.opacity(0.3), width: 0.5)
                 }
             }
