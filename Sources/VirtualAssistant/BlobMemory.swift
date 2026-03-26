@@ -5,6 +5,39 @@ struct Memory: Codable {
     let fact: String
     let timestamp: Date
     let category: String  // "preference", "fact", "interest", etc.
+
+    enum CodingKeys: String, CodingKey {
+        case fact, timestamp, category
+    }
+
+    init(fact: String, timestamp: Date, category: String) {
+        self.fact = fact
+        self.timestamp = timestamp
+        self.category = category
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fact = try container.decode(String.self, forKey: .fact)
+        category = try container.decode(String.self, forKey: .category)
+
+        // Handle both string and double timestamps
+        if let doubleTime = try? container.decode(Double.self, forKey: .timestamp) {
+            timestamp = Date(timeIntervalSince1970: doubleTime)
+        } else if let stringTime = try? container.decode(String.self, forKey: .timestamp),
+                  let doubleTime = Double(stringTime) {
+            timestamp = Date(timeIntervalSince1970: doubleTime)
+        } else {
+            timestamp = Date()
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fact, forKey: .fact)
+        try container.encode(category, forKey: .category)
+        try container.encode(timestamp.timeIntervalSince1970, forKey: .timestamp)
+    }
 }
 
 class BlobMemory: ObservableObject {

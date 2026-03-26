@@ -43,6 +43,30 @@ class SpotifyController {
         }
     }
 
+    func getTrackInfo(completion: @escaping (_ trackName: String, _ artist: String, _ isPlaying: Bool) -> Void) {
+        let script = """
+        tell application "Spotify"
+            set currentTrackName to name of current track
+            set currentArtist to artist of current track
+            set isPlaying to player state is playing
+            return currentTrackName & "|" & currentArtist & "|" & isPlaying
+        end tell
+        """
+
+        DispatchQueue.global().async {
+            let result = self.runAppleScriptAndReturn(script)
+            let parts = result.split(separator: "|").map(String.init)
+
+            let trackName = parts.count > 0 ? parts[0].trimmingCharacters(in: .whitespaces) : ""
+            let artist = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+            let isPlaying = parts.count > 2 ? parts[2].trimmingCharacters(in: .whitespaces) == "true" : false
+
+            DispatchQueue.main.async {
+                completion(trackName, artist, isPlaying)
+            }
+        }
+    }
+
     func setVolume(_ volume: Int) {
         let volumeClamped = max(0, min(100, volume))
         runAppleScript("tell application \"Spotify\" to set sound volume to \(volumeClamped)")
@@ -66,8 +90,21 @@ class SpotifyController {
         task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         task.arguments = ["-e", script]
 
+        let pipe = Pipe()
+        task.standardError = pipe
+
         do {
             try task.run()
+            task.waitUntilExit()
+
+            if task.terminationStatus != 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let errorMsg = String(data: data, encoding: .utf8), !errorMsg.isEmpty {
+                    print("❌ Spotify Error: \(errorMsg)")
+                } else {
+                    print("❌ Spotify command failed (status: \(task.terminationStatus))")
+                }
+            }
         } catch {
             print("❌ Spotify Error: \(error)")
         }
