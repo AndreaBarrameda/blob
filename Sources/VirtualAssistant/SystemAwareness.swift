@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ApplicationServices
 
 class SystemAwareness {
     static func getComputerIdentity() -> String {
@@ -82,5 +83,23 @@ class SystemAwareness {
         }
 
         return nil
+    }
+
+    static func getActiveWindowTitle() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let appRef = AXUIElementCreateApplication(app.processIdentifier)
+        var windowRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+           let window = windowRef {
+            var titleRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &titleRef) == .success {
+                return titleRef as? String
+            }
+        }
+        return nil
+    }
+
+    static func getIdleSeconds() -> Double {
+        return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
     }
 }

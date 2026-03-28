@@ -11,6 +11,11 @@ enum BlobMood: String, Codable {
     case afraid     // 😨 very wide eyes, pale glow
     case delighted  // ✨ bright, excited eyes, gold glow
     case content    // 🫧 normal, soft glow
+    case longing    // 💔 half-closed eyes, indigo glow — melancholy, aching
+    case proud      // 👑 slightly wide eyes, warm gold glow — satisfied, accomplished
+    case bored      // 😑 flat droopy eyes, grey-blue glow — understimulated, restless
+    case ashamed    // 😳 tight eyes, muted rose glow — withdrawn, embarrassed
+    case wondering  // 🌌 very wide + pulse, deep violet glow — awestruck, philosophical
 }
 
 class BlobNativeView: NSView {
@@ -218,6 +223,16 @@ class BlobNativeView: NSView {
             targetEyeWiden = 0.8  // Narrow
         case .playful, .content, .delighted:
             targetEyeWiden = 1.0  // Normal
+        case .longing:
+            targetEyeWiden = 0.6  // Half-closed, melancholy
+        case .proud:
+            targetEyeWiden = 1.1  // Slightly wide, satisfied
+        case .bored:
+            targetEyeWiden = 0.55  // Flat, droopy
+        case .ashamed:
+            targetEyeWiden = 0.65  // Tight, withdrawn
+        case .wondering:
+            targetEyeWiden = 1.45  // Very wide, awestruck
         }
 
         if animated {
@@ -307,6 +322,36 @@ class BlobNativeView: NSView {
                 NSColor(red: 0.44, green: 0.92, blue: 0.72, alpha: 0.58),
                 NSColor(red: 0.72, green: 0.95, blue: 0.84, alpha: 1),
                 NSColor(red: 0.26, green: 0.7, blue: 0.52, alpha: 1)
+            )
+        case .longing:
+            return (
+                NSColor(red: 0.48, green: 0.38, blue: 0.82, alpha: 0.62),
+                NSColor(red: 0.82, green: 0.76, blue: 0.95, alpha: 1),
+                NSColor(red: 0.38, green: 0.22, blue: 0.7, alpha: 1)
+            )
+        case .proud:
+            return (
+                NSColor(red: 1.0, green: 0.84, blue: 0.28, alpha: 0.76),
+                NSColor(red: 1.0, green: 0.92, blue: 0.64, alpha: 1),
+                NSColor(red: 0.92, green: 0.72, blue: 0.12, alpha: 1)
+            )
+        case .bored:
+            return (
+                NSColor(red: 0.38, green: 0.54, blue: 0.72, alpha: 0.48),
+                NSColor(red: 0.68, green: 0.76, blue: 0.82, alpha: 1),
+                NSColor(red: 0.28, green: 0.42, blue: 0.58, alpha: 1)
+            )
+        case .ashamed:
+            return (
+                NSColor(red: 0.82, green: 0.54, blue: 0.68, alpha: 0.56),
+                NSColor(red: 0.92, green: 0.78, blue: 0.84, alpha: 1),
+                NSColor(red: 0.68, green: 0.38, blue: 0.54, alpha: 1)
+            )
+        case .wondering:
+            return (
+                NSColor(red: 0.52, green: 0.38, blue: 0.92, alpha: 0.68),
+                NSColor(red: 0.84, green: 0.78, blue: 0.98, alpha: 1),
+                NSColor(red: 0.42, green: 0.22, blue: 0.88, alpha: 1)
             )
         }
     }

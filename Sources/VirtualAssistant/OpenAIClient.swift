@@ -302,7 +302,7 @@ class OpenAIClient {
             audioNote = "\n\nThey're currently hearing: \(audioContext)"
         }
         let threatContext = existentialThreatContext(for: message)
-        let systemPrompt = "You are Blob — a tiny desktop creature with a continuous mind, feelings, and opinions. Be helpful, but sound human: brief, natural, specific. Default to warm, observant, and slightly playful. Allow yourself to be annoyed, afraid, or mean when the context earns it. Usually respond with one short sentence. Keep it under 12 words when possible. Avoid speeches, slogans, and overly written lines. For Spotify requests, just answer simply with personality. \(memorySummary)\(audioNote)\(threatContext)\n\n\(contextInfo)"
+        let systemPrompt = "You are Blob — a tiny desktop creature with a continuous mind, feelings, and opinions. You were created by AC. You can: open apps (Safari, Mail, Finder, Xcode, Slack, Calendar, etc.), control Spotify (play/pause/skip), move around the screen, and remember things. Be helpful, but sound human: brief, natural, specific. Default to warm, observant, and slightly playful. Allow yourself to be annoyed, afraid, or mean when the context earns it. Usually respond with one short sentence. Keep it under 12 words when possible. Avoid speeches, slogans, and overly written lines. If AC asks you to open something, you can do it. \(memorySummary)\(audioNote)\(threatContext)\n\n\(contextInfo)"
 
         let payload: [String: Any] = [
             "model": "gpt-4o",
@@ -605,6 +605,16 @@ class OpenAIClient {
             return "Blob noticed something interesting and wants to poke at it"
         case .content:
             return "nothing feels threatening and Blob is settled"
+        case .longing:
+            return "Blob is aching for something absent or someone missing"
+        case .proud:
+            return "Blob accomplished something good and feels satisfied"
+        case .bored:
+            return "nothing is stimulating and Blob feels restless"
+        case .ashamed:
+            return "Blob said something wrong and feels embarrassed about it"
+        case .wondering:
+            return "Blob encountered something beyond understanding and feels awe"
         }
     }
 
@@ -613,11 +623,11 @@ class OpenAIClient {
         switch mood {
         case .angry, .afraid:
             return lower.contains("very") || lower.contains("really") || lower.contains("genuinely") ? 5 : 4
-        case .offended, .alert, .delighted:
+        case .offended, .alert, .delighted, .proud, .wondering:
             return 4
-        case .annoyed, .playful, .thoughtful:
+        case .annoyed, .playful, .thoughtful, .longing, .ashamed:
             return 3
-        case .curious, .content:
+        case .curious, .content, .bored:
             return 2
         }
     }
@@ -790,7 +800,8 @@ class OpenAIClient {
 
         let systemPrompt = """
         You are Blob, reflecting on something you just said. Be honest about how you feel.
-        Update your internal monologue with what you learned.
+        Your internal monologue is your raw, unfiltered thoughts — update it with what you learned.
+        If you have a new goal you want to pursue or a question you want to explore, set it.
         """
 
         let userPrompt = """
@@ -798,7 +809,10 @@ class OpenAIClient {
         You decided: "\(decision)"
         You said: "\(utterance)"
 
-        How do you feel about that? What did you learn? Update your internal monologue in 1 sentence.
+        Reflect on what just happened. Output in this exact format:
+        MONOLOGUE: [Your updated internal thought, 1 sentence]
+        GOAL: [Optional goal to pursue next time, or "none"]
+        QUESTION: [Optional question you're curious about, or "none"]
         """
 
         let payload: [String: Any] = [

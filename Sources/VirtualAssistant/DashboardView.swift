@@ -519,8 +519,8 @@ struct DashboardView: View {
                 refreshTaskInfo()
             }
 
-            // Refresh context every 30 seconds
-            Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            // Refresh context every 10 seconds for real-time mind state
+            Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
                 refreshContextInfo()
                 refreshMindState()
                 if workMode {
@@ -644,7 +644,31 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func mindStateTab() -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                // Soul & Purpose Section
+                VStack(alignment: .leading, spacing: 6) {
+                    if mindStateInfo.isEmpty {
+                        Text("🫧 Blob's mind is still waking up...")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else {
+                        ForEach(mindStateInfo.split(separator: "\n").map(String.init), id: \.self) { line in
+                            Text(line)
+                                .font(.caption2)
+                                .foregroundColor(.black)
+                                .lineLimit(nil)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color(red: 0.98, green: 0.97, blue: 1.0))
+                .border(Color(red: 0.7, green: 0.6, blue: 1.0), width: 1)
+
+                Divider().padding(.vertical, 4)
+
+            // Emotional Controls
             emotionalSlider("Attachment", level: attachmentLevel) {
                 if let app = NSApplication.shared.delegate as? AppDelegate {
                     app.setAttachmentLevel($0); refreshMindState()
@@ -682,6 +706,7 @@ struct DashboardView: View {
             }
         }
         .padding(10)
+    }
     }
 
     @ViewBuilder
@@ -793,6 +818,9 @@ struct DashboardView: View {
         // Check for Spotify commands
         handleSpotifyCommands(in: userMessage)
 
+        // Check for calendar commands
+        handleCalendarCommands(in: userMessage)
+
         // Get audio context, location/weather, and task context from AppDelegate
         var audioContext = ""
         var contextInfo = ""
@@ -866,19 +894,28 @@ struct DashboardView: View {
     private func handleSpotifyCommands(in message: String) {
         let lower = message.lowercased()
 
-        if lower.contains("play") {
-            // Try to extract song/artist name
-            if let songName = extractSongName(from: message) {
-                spotify.playSearch(query: songName)
-            } else {
-                spotify.play()
+        // Ensure Spotify is running
+        print("🎵 Launching Spotify...")
+        _ = SystemControl.launchApp("com.spotify.client")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if lower.contains("play") {
+                print("🎵 Spotify: Playing")
+                self.spotify.play()
+                self.messages.append(ChatMessage(text: "🎵 Now playing on Spotify", isUser: false))
+            } else if lower.contains("pause") || lower.contains("stop") {
+                print("⏸️ Spotify: Pausing")
+                self.spotify.pause()
+                self.messages.append(ChatMessage(text: "⏸️ Paused", isUser: false))
+            } else if lower.contains("next") || lower.contains("skip") {
+                print("⏭️ Spotify: Next track")
+                self.spotify.nextTrack()
+                self.messages.append(ChatMessage(text: "⏭️ Next track", isUser: false))
+            } else if lower.contains("previous") || lower.contains("back") {
+                print("⏮️ Spotify: Previous track")
+                self.spotify.previousTrack()
+                self.messages.append(ChatMessage(text: "⏮️ Previous track", isUser: false))
             }
-        } else if lower.contains("pause") {
-            spotify.pause()
-        } else if lower.contains("next") || lower.contains("skip") {
-            spotify.nextTrack()
-        } else if lower.contains("previous") || lower.contains("back") {
-            spotify.previousTrack()
         }
     }
 
@@ -907,6 +944,52 @@ struct DashboardView: View {
         }
 
         return nil
+    }
+
+    private func handleCalendarCommands(in message: String) {
+        let lower = message.lowercased()
+
+        // Check for "add" or "create" + "calendar", "event", or "appointment"
+        if (lower.contains("add") || lower.contains("create")) &&
+           (lower.contains("calendar") || lower.contains("event") || lower.contains("appointment")) {
+
+            // Extract event title - everything after "add" or "create"
+            var titleText = ""
+            if let range = lower.range(of: "add") {
+                titleText = String(message[range.upperBound...])
+            } else if let range = lower.range(of: "create") {
+                titleText = String(message[range.upperBound...])
+            }
+
+            titleText = titleText
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "to for calendar event appointment"))
+                .trimmingCharacters(in: .whitespaces)
+                .prefix(100)
+                .trimmingCharacters(in: .whitespaces)
+
+            if !titleText.isEmpty {
+                print("📅 User requested: add '\(titleText)' to calendar")
+
+                // Add event for tomorrow at 10am
+                let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                var components = Calendar.current.dateComponents([.year, .month, .day], from: tomorrow)
+                components.hour = 10
+                components.minute = 0
+                let eventDate = Calendar.current.date(from: components) ?? tomorrow
+
+                SystemControl.addCalendarEvent(title: String(titleText), startDate: eventDate)
+                messages.append(ChatMessage(text: "📅 Adding '\(titleText)' to your calendar for tomorrow at 10 AM", isUser: false))
+            } else {
+                print("⚠️ Could not extract event title from: \(message)")
+            }
+        }
+        // Check for just "open calendar"
+        else if lower.contains("calendar") {
+            print("📅 User requested: open Calendar")
+            SystemControl.openCalendar()
+            messages.append(ChatMessage(text: "📅 Opening Calendar", isUser: false))
+        }
     }
 }
 
