@@ -529,6 +529,7 @@ class OpenAIClient {
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
         print("🫧 Making consciousness API call...")
+        print("🫧 System Prompt:\n\(systemPrompt)\n")
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 print("🫧 Consciousness API Error: \(error.localizedDescription)")

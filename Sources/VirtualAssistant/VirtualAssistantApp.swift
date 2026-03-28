@@ -165,10 +165,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         }
 
         // Start visual observation loop if enabled
+        print("🫧 autonomousObservationsEnabled: \(autonomousObservationsEnabled)")
         if autonomousObservationsEnabled {
             startObservationLoop()
         }
 
+        print("🫧 ambientAwarenessEnabled: \(ambientAwarenessEnabled)")
         if ambientAwarenessEnabled {
             startAmbientAwarenessLoop()
         }
