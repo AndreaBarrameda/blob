@@ -71,7 +71,8 @@ class AudioCaptureManager: NSObject, AVAudioRecorderDelegate {
             audioBuffer.removeAll()
 
             print("🎙️ Audio chunk ready (\(audioData.count) bytes)")
-            // Return audio data via completion - we'll add this callback next
+            // TODO: Wire audio to OpenAIClient.transcribeAudio() to complete the pipeline.
+            // Needs a delegate/callback to send audioData to AppDelegate for transcription.
         }
     }
 

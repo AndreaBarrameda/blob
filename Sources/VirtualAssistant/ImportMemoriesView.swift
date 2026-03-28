@@ -115,7 +115,7 @@ struct ImportMemoriesView: View {
             """
         }
 
-        openAI.chat(message: prompt) { response in
+        openAI.chat(message: prompt) { response, _ in
             DispatchQueue.main.async {
                 self.parseExtractedFacts(response)
                 self.isProcessing = false

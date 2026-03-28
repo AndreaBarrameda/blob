@@ -16,10 +16,10 @@ class SpeechBubbleWindow: NSWindow {
         let height = ceil(boundingRect.height) + 30
 
         // Position bubble above blob with good spacing
-        // Blob is 120x120, so place bubble well above it
-        let blobCenterX = originPoint.x + 60
+        // Blob window is 300x300 — blob body is centered within it
+        let blobCenterX = originPoint.x + 150
         let bubbleX = blobCenterX - width / 2
-        let bubbleY = originPoint.y + 160  // 120 (blob height) + 40px gap for full visibility
+        let bubbleY = originPoint.y + 270  // Above the glow rings with spacing
 
         super.init(
             contentRect: NSRect(x: bubbleX, y: bubbleY, width: width, height: height),

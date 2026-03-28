@@ -19,13 +19,25 @@ struct DashboardView: View {
     @State private var taskInfo = ""
     @State private var mindStateInfo = ""
     @State private var showSystemControl = false
+    @State private var chatTimeoutTimer: Timer?
 
-    private let openAI = OpenAIClient()
-    private let spotify = SpotifyController()
-    private let memory = BlobMemory()
+    private var openAI: OpenAIClient {
+        (NSApplication.shared.delegate as? AppDelegate)?.openAI ?? OpenAIClient()
+    }
+    private var spotify: SpotifyController {
+        (NSApplication.shared.delegate as? AppDelegate)?.spotify ?? SpotifyController()
+    }
+    private var memory: BlobMemory {
+        (NSApplication.shared.delegate as? AppDelegate)?.memory ?? BlobMemory()
+    }
+    private var conversationLog: ConversationLog {
+        (NSApplication.shared.delegate as? AppDelegate)?.conversationLog ?? ConversationLog()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+          ScrollView {
+            VStack(spacing: 0) {
             // Context Status (Time, Location, Weather)
             if !contextInfo.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -106,7 +118,8 @@ struct DashboardView: View {
 
                     Spacer()
 
-                    Toggle("", isOn: $listeningMode)
+                    Toggle(isOn: $listeningMode) { EmptyView() }
+                        .labelsHidden()
                         .onChange(of: listeningMode) { newValue in
                             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                                 if newValue {
@@ -134,7 +147,8 @@ struct DashboardView: View {
 
                     Spacer()
 
-                    Toggle("", isOn: $workMode)
+                    Toggle(isOn: $workMode) { EmptyView() }
+                        .labelsHidden()
                         .onChange(of: workMode) { newValue in
                             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                                 if newValue {
@@ -164,7 +178,8 @@ struct DashboardView: View {
 
                     Spacer()
 
-                    Toggle("", isOn: $screenWatchEnabled)
+                    Toggle(isOn: $screenWatchEnabled) { EmptyView() }
+                        .labelsHidden()
                         .onChange(of: screenWatchEnabled) { newValue in
                             UserDefaults.standard.set(newValue, forKey: "autonomousObservationsEnabled")
                             NotificationCenter.default.post(
@@ -199,7 +214,8 @@ struct DashboardView: View {
 
                     Spacer()
 
-                    Toggle("", isOn: $ambientAwarenessEnabled)
+                    Toggle(isOn: $ambientAwarenessEnabled) { EmptyView() }
+                        .labelsHidden()
                         .onChange(of: ambientAwarenessEnabled) { newValue in
                             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                                 appDelegate.setAmbientAwarenessEnabled(newValue)
@@ -223,7 +239,8 @@ struct DashboardView: View {
 
                     Spacer()
 
-                    Toggle("", isOn: $autonomousSpeechEnabled)
+                    Toggle(isOn: $autonomousSpeechEnabled) { EmptyView() }
+                        .labelsHidden()
                         .onChange(of: autonomousSpeechEnabled) { newValue in
                             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                                 appDelegate.setAutonomousSpeechEnabled(newValue)
@@ -275,17 +292,17 @@ struct DashboardView: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.black)
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                    moodLegendItem(color: Color(red: 0.62, green: 0.9, blue: 1.0), label: "Curious", meaning: "interested")
-                    moodLegendItem(color: Color(red: 0.78, green: 0.75, blue: 0.98), label: "Thoughtful", meaning: "analyzing")
-                    moodLegendItem(color: Color(red: 1.0, green: 0.78, blue: 0.9), label: "Playful", meaning: "teasing")
-                    moodLegendItem(color: Color(red: 1.0, green: 0.66, blue: 0.5), label: "Alert", meaning: "warning")
-                    moodLegendItem(color: Color(red: 0.93, green: 0.34, blue: 0.3), label: "Angry", meaning: "mad")
-                    moodLegendItem(color: Color(red: 1.0, green: 0.84, blue: 0.52), label: "Annoyed", meaning: "irritated")
-                    moodLegendItem(color: Color(red: 1.0, green: 0.7, blue: 0.82), label: "Offended", meaning: "personally slighted")
-                    moodLegendItem(color: Color(red: 0.9, green: 0.97, blue: 1.0), label: "Afraid", meaning: "uneasy")
-                    moodLegendItem(color: Color(red: 1.0, green: 0.94, blue: 0.56), label: "Delighted", meaning: "impressed")
-                    moodLegendItem(color: Color(red: 0.72, green: 0.95, blue: 0.84), label: "Content", meaning: "calm")
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 5), spacing: 6) {
+                    moodDot(color: Color(red: 0.62, green: 0.9, blue: 1.0), label: "Curious")
+                    moodDot(color: Color(red: 0.78, green: 0.75, blue: 0.98), label: "Thoughtful")
+                    moodDot(color: Color(red: 1.0, green: 0.78, blue: 0.9), label: "Playful")
+                    moodDot(color: Color(red: 1.0, green: 0.66, blue: 0.5), label: "Alert")
+                    moodDot(color: Color(red: 0.93, green: 0.34, blue: 0.3), label: "Angry")
+                    moodDot(color: Color(red: 1.0, green: 0.84, blue: 0.52), label: "Annoyed")
+                    moodDot(color: Color(red: 1.0, green: 0.7, blue: 0.82), label: "Offended")
+                    moodDot(color: Color(red: 0.9, green: 0.97, blue: 1.0), label: "Afraid")
+                    moodDot(color: Color(red: 1.0, green: 0.94, blue: 0.56), label: "Delighted")
+                    moodDot(color: Color(red: 0.72, green: 0.95, blue: 0.84), label: "Content")
                 }
             }
             .padding(10)
@@ -426,6 +443,10 @@ struct DashboardView: View {
             .background(Color(red: 0.98, green: 1.0, blue: 0.98))
             .border(Color.gray.opacity(0.3), width: 0.5)
 
+            } // end controls VStack
+          } // end controls ScrollView
+          .frame(maxHeight: 350)
+
             // Chat
             ScrollViewReader { proxy in
                 ScrollView {
@@ -481,9 +502,9 @@ struct DashboardView: View {
             }
             .padding(10)
         }
+        .frame(minWidth: 420, minHeight: 600)
         .onAppear {
             updateCurrentTrack()
-            openAI.memory = memory
             refreshContextInfo()
             refreshMindState()
             publishDashboardState()
@@ -568,15 +589,14 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
-    private func moodLegendItem(color: Color, label: String, meaning: String) -> some View {
-        HStack(spacing: 6) {
+    private func moodDot(color: Color, label: String) -> some View {
+        VStack(spacing: 3) {
             Circle()
                 .fill(color)
-                .frame(width: 10, height: 10)
-            Text("\(label): \(meaning)")
-                .font(.caption2)
-                .foregroundColor(.black)
-            Spacer(minLength: 0)
+                .frame(width: 12, height: 12)
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
         }
     }
 
@@ -617,16 +637,42 @@ struct DashboardView: View {
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
 
-        let completion: (String) -> Void = { response in
+        // Cancel any previous timeout
+        chatTimeoutTimer?.invalidate()
+
+        let completion: (String, BlobMood) -> Void = { response, mood in
             DispatchQueue.main.async {
+                chatTimeoutTimer?.invalidate()
+                chatTimeoutTimer = nil
+
+                guard isLoading else { return } // timeout already fired
+
                 messages.append(ChatMessage(text: response, isUser: false))
                 isLoading = false
                 updateCurrentTrack()
                 publishDashboardState()
 
+                // Update blob mood from LLM response
+                if let blobView = (NSApplication.shared.delegate as? AppDelegate)?.blobWindow?.contentView as? BlobNativeView {
+                    blobView.setMood(mood, animated: true)
+                }
+
+                // Log to conversation history
+                conversationLog.logChat(userMessage: userMessage, blobResponse: response, mood: mood.rawValue)
+
                 // Extract memories from conversation
                 let conversation = "\(userMessage) -> \(response)"
                 memory.extractMemories(from: conversation, usingOpenAI: openAI) {}
+            }
+        }
+
+        // 30-second timeout — recover UI if API never responds
+        chatTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { _ in
+            DispatchQueue.main.async {
+                guard isLoading else { return }
+                messages.append(ChatMessage(text: "...brain went offline. try again?", isUser: false))
+                isLoading = false
+                publishDashboardState()
             }
         }
 
@@ -706,6 +752,42 @@ struct DashboardView: View {
         }
 
         return nil
+    }
+}
+
+struct ChatMessage: Identifiable, Equatable {
+    let id: UUID
+    let text: String
+    let isUser: Bool
+
+    init(text: String, isUser: Bool) {
+        self.id = UUID()
+        self.text = text
+        self.isUser = isUser
+    }
+
+    static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+struct ChatBubble: View {
+    let message: ChatMessage
+
+    var body: some View {
+        HStack {
+            if message.isUser { Spacer() }
+
+            Text(message.text)
+                .padding(12)
+                .background(message.isUser ? Color.blue : Color(red: 0.9, green: 0.93, blue: 0.97))
+                .foregroundColor(message.isUser ? .white : .black)
+                .cornerRadius(10)
+                .frame(maxWidth: 300, alignment: message.isUser ? .trailing : .leading)
+
+            if !message.isUser { Spacer() }
+        }
+        .padding(.horizontal)
     }
 }
 

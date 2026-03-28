@@ -4,121 +4,134 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-### Build and Run
 ```bash
-# Build from command line
+# CLI tool (in PATH)
+blob start          # Build (if needed) + launch in background
+blob stop           # Kill running instance
+blob restart        # Stop + start
+blob status         # Check if running
+blob log            # Tail the log file
+blob build          # Just build, don't run
+
+# Manual build
 swift build
-
-# Run the app
-swift run VirtualAssistant
-
-# Build and run in one command
 swift build && swift run VirtualAssistant
-
-# Open in Xcode
-open -a Xcode .
 ```
 
 ### Requirements
 - macOS 13+
 - Swift 5.9+
-- Xcode 14+ (for development)
-- OpenAI API key in `.env` file
+- OpenAI API key in `.env` file (`OPENAI_API_KEY=sk-...`)
+- `.env` search order: next to binary, project root, cwd, home dir
+
+### macOS Permissions (prompted on first run)
+- Screen Recording — for screenshot-based observation loop
+- Accessibility — for reading typed text and focused UI elements
+- Microphone — only if Listening Mode enabled
 
 ## Architecture
 
-This is a macOS floating window app featuring "Blob" — an AI assistant character that monitors the system and provides witty commentary.
+macOS floating window app — "Blob" is an AI desktop creature that watches the screen, reacts with personality, and remembers things about the user.
 
-### Core Module: AppDelegate (VirtualAssistantApp.swift)
-The `AppDelegate` is the central orchestrator that manages:
-- **Window Management**: Controls the floating blob window, dashboard panel, and speech bubbles
-- **Timed Observation Loop**: Every 15 seconds, captures screen and system state, sends to OpenAI, and displays responses
-- **User Interaction**: Handles blob clicks to toggle dashboard; 5+ rapid clicks triggers "angry" mood
-- **State Persistence**: Stores user preferences (work mode, listening mode) in `UserDefaults`
+### AppDelegate (VirtualAssistantApp.swift)
+Central orchestrator managing:
+- **Window Management**: Blob window (300x300 borderless), dashboard panel, speech bubbles (child windows that follow blob)
+- **Menu Bar Icon**: NSStatusItem — click to toggle dashboard panel
+- **Observation Loop**: 15-second timer captures screen + system state → OpenAI GPT-4o vision → speech bubble
+- **Ambient Awareness Loop**: 8-second timer for non-visual system context observations
+- **Blob Clicks**: Cute/angry reactions on tap (dashboard moved to menu bar)
+- **Mind State**: Tracks attachment, trust, fear, resentment, love levels that evolve with interactions
+
+### OpenAIClient (OpenAIClient.swift)
+- **Unified personality** (`OpenAIClient.personality`) — single static prompt shared by all 4 API code paths
+- **Structured mood tags** — LLM prefixes responses with `[mood]` tag (e.g., `[playful] three tabs of stackoverflow`), parsed by `parseMoodTag()`. Falls back to keyword-based `inferMood()` if no tag present
+- **4 API methods**: `chat`, `chatWithScreenAwareness`, `ambientObservation`, `observationRequest` — all use `makeChatRequest()` internally
+- All methods return `(String, BlobMood)` — utterance + mood from the LLM
+
+### BlobNativeView (BlobNativeView.swift)
+NSView with custom `draw(_:)` rendering:
+- **Organic body**: 64-vertex contour deformed by 3 overlapping sine waves (not a circle)
+- **8-ring glow**: Smooth alpha falloff, organic shape, pulses with breathing
+- **Eyes**: White sclera + black pupils, mouse-tracking with lerp inertia
+- **Mouth**: Mood-specific shapes (smile, frown, O, flat line, pout)
+- **Squash/stretch**: Bob velocity drives width/height deformation
+- **Micro-movements**: Idle drift, breathing amplitude variation, double-blink (15% chance)
+- **10 moods**: content, playful, curious, thoughtful, angry, annoyed, offended, afraid, alert, delighted
+
+### BlobMemory (BlobMemory.swift)
+- **MEMORY.md** — human-readable markdown file in project root, newest entries at top
+- Created automatically on first launch if missing
+- `extractMemories()` uses GPT to extract facts from conversations, deduplicates against existing knowledge
+- `getMemorySummary()` feeds recent entries into every LLM prompt as context
+
+### ConversationLog (ConversationLog.swift)
+- **CONVERSATION.md** — full history of every exchange (chat, observation, ambient), newest at top
+- Created automatically on first launch if missing
+- `logChat()/logObservation()/logAmbient()` — append timestamped entries with type + mood
+- `getRecentContext(limit:)` — returns last N exchanges formatted for LLM prompt, preventing repetition
+- In-memory cache of last 20 entries for fast access; loads from file on startup
 
 ### Key Managers
-Each manager encapsulates a specific system capability:
+- **SystemMonitor** — Battery level, running apps
+- **SystemAwareness** — Real CPU/memory/disk usage (via `host_statistics64`, `vm_statistics64`, `FileManager`)
+- **ScreenCapture** — Native `CGWindowListCreateImage` (primary) + `screencapture` CLI (fallback), JPEG at 40% quality
+- **ContentCapture** — Clipboard + focused text field (Accessibility API) + InputAwarenessManager (key/mouse events)
+- **InputAwarenessManager** — Global key/mouse event monitoring, 90-second retention window
+- **AudioCaptureManager** — PCM audio capture + WAV conversion (Whisper pipeline incomplete — captures but doesn't transcribe)
+- **SpotifyController** — AppleScript-based playback control + track info
+- **SystemControl** — App launching, shell commands (with destructive command blocklist), file browsing
 
-- **SystemMonitor** — Tracks battery level, running apps, system status
-- **OpenAIClient** — API wrapper for GPT-4o chat/vision and audio transcription
-- **AudioCaptureManager** — Records system audio (for listening mode)
-- **ScreenCapture** — Screenshots and encodes as base64 for vision API
-- **ContentCapture** — Extracts recently typed text from frontmost app
-- **SystemAwareness** — Gathers detailed system info (CPU, memory, disk, network)
-- **TaskContextManager** — Tracks user's current tasks (work mode only)
-- **LocationWeatherManager** — Provides location/weather context
-- **SpotifyController** — Reads currently playing track
+### UI
+- **DashboardView** — SwiftUI panel: chat, toggles (listening/work/screen watch/ambient/speech), Spotify controls, mood legend, memory import/export, system control
+- **SpeechBubbleWindow** — Child window of blob (follows when dragged), auto-hides after reading duration
 
-### UI Architecture
+## Data Flow
 
-- **BlobNativeView** — Animated blob rendering (mood states: content, playful, thoughtful, curious, alert, angry)
-- **SpeechBubbleView/SpeechBubbleWindow** — Displays Blob's utterances above the blob for 4 seconds
-- **DashboardView** — Main panel showing chat, system info, controls (appears on blob click)
-- **BlobMemory** — Persistent memory system stored in `.blob_memory.json`
+1. **Observation Cycle** (15s):
+   Screen capture + system state + MEMORY.md + CONVERSATION.md (last 10) → GPT-4o vision → `[mood] utterance` → parse mood tag → set blob visual mood + show speech bubble → log to CONVERSATION.md
 
-### Data Flow
+2. **Ambient Awareness** (8s):
+   System signals only (no screenshot) + CONVERSATION.md (last 10) → GPT-4o → mood-tagged utterance → bubble → log to CONVERSATION.md
 
-1. **Observation Cycle** (15-second timer):
-   - Capture screen, typed content, system state, task context
-   - Build comprehensive context string
-   - Send to OpenAI with system prompt defining Blob's personality (witty, sarcastic, system-aware)
-   - Parse mood from response (angry, playful, thoughtful, curious)
-   - Update blob mood animation and display speech bubble
+3. **Dashboard Chat**:
+   User message + screen (if enabled) + context + CONVERSATION.md (last 10) → GPT-4o → response with mood → bubble → log to CONVERSATION.md + extract memories to MEMORY.md
 
-2. **User Interaction**:
-   - Blob tap → toggle dashboard
-   - 5+ rapid taps → trigger "angry" mood with sarcastic response
-   - Dashboard interactions → modify modes, preferences
+4. **Memory Pipeline**:
+   After each chat exchange → GPT extracts 1-2 facts → deduplicates → prepends to MEMORY.md → future prompts include recent memories
 
-3. **State Persistence**:
-   - Work mode / Listening mode → `UserDefaults`
-   - Blob memories → `.blob_memory.json`
-   - Blob consciousness state → system files
-
-## Key Design Patterns
-
-### Delegation
-- `BlobConsciousnessDelegate` protocol allows mood/speech responses to propagate back to AppDelegate UI updates
-
-### Timers
-- 15-second observation loop (main character loop)
-- 2-second click reset (for multi-click detection)
-- 0.5-second window ordering (keeps blob on top)
-- 4-second speech bubble auto-hide
-
-### Environment & Secrets
-- API keys stored in `.env` file (NOT version controlled, see `.gitignore`)
-- OpenAI API key required: `OPENAI_API_KEY`
-- Optional: Spotify device ID for music control
-
-## Important Notes
-
-- **Mood System**: BlobMood enum (content, playful, thoughtful, curious, alert, angry) drives visual state
-- **System Awareness**: Blob references specific apps, files, battery %, CPU usage in responses — this requires real data capture
-- **Performance**: Screen capture + base64 encoding happens every 15 seconds; consider memory/CPU impact if reducing interval
-- **Window Behavior**: Blob runs as accessory app (no dock icon); windows have `.canJoinAllSpaces` behavior
-- **Animations**: Blob mood changes are animated; speech bubbles fade with auto-dismiss
-- **Error Handling**: Missing API key will cause API calls to fail silently; check `.env` file first
-
-## Directory Structure
+## Key Files
 
 ```
 Sources/VirtualAssistant/
-├── VirtualAssistantApp.swift          # App entry point & AppDelegate
-├── BlobNativeView.swift               # Blob animation rendering
-├── BlobMemory.swift                   # Persistent memory management
-├── BlobConsciousness.swift            # AI decision/mood logic
-├── SpeechBubbleView.swift             # Utterance display
-├── DashboardView.swift                # Main UI panel
-├── SystemMonitor.swift                # System info tracking
-├── SystemAwareness.swift              # Detailed system data
-├── SystemControl.swift                # System interaction
-├── SystemControlPanel.swift           # System control UI
-├── OpenAIClient.swift                 # API wrapper
-├── AudioCaptureManager.swift          # Audio recording
-├── ScreenCapture.swift                # Screen capture/encode
-├── ContentCapture.swift               # Typed text extraction
-├── TaskContextManager.swift           # Task tracking
-├── LocationWeatherManager.swift       # Location/weather
-└── SpotifyController.swift            # Music integration
+├── VirtualAssistantApp.swift     # AppDelegate — orchestrator, observation loops, mind state
+├── OpenAIClient.swift            # Unified personality, mood tags, all API methods
+├── BlobNativeView.swift          # Organic blob rendering + animations
+├── BlobMemory.swift              # MEMORY.md read/write
+├── ConversationLog.swift         # CONVERSATION.md — full exchange history + recent context for LLM
+├── DashboardView.swift           # SwiftUI dashboard + ChatMessage/ChatBubble types
+├── SpeechBubbleView.swift        # Speech bubble window
+├── SystemAwareness.swift         # Real CPU/memory/disk via macOS APIs
+├── SystemMonitor.swift           # Battery + running apps
+├── SystemControl.swift           # App launch, shell exec, clipboard
+├── SystemControlPanel.swift      # System control UI
+├── ScreenCapture.swift           # Screenshot + base64
+├── ContentCapture.swift          # Typed text extraction
+├── InputAwarenessManager.swift   # Global key/mouse monitoring
+├── AudioCaptureManager.swift     # Audio capture (transcription TODO)
+├── TaskContextManager.swift      # Task tracking (work mode)
+├── LocationWeatherManager.swift  # Location/weather context
+├── SpotifyController.swift       # Playback control via AppleScript
+├── SpotifyWebAPI.swift           # Spotify search URI opener
+├── ImportMemoriesView.swift      # ChatGPT memory import
+├── ExportMemoriesView.swift      # ChatGPT memory export
+└── SystemInfoView.swift          # System info display
 ```
+
+## Important Notes
+
+- **Personality**: Defined once in `OpenAIClient.personality`. Blob is opinionated, teasing, tracks patterns — NOT a generic assistant
+- **Mood System**: LLM returns `[mood]` tags parsed by `parseMoodTag()`. 10 moods drive visual state (body color, glow, eye shape, mouth)
+- **Memory**: MEMORY.md in project root. Human-readable. Newest at top. Fed into every LLM call
+- **No dock icon**: Runs as `.accessory` app. Menu bar icon toggles dashboard
+- **Speech bubbles**: Child windows of blob — follow when dragged, auto-dismiss after word-count-scaled duration
+- **`.env` not in repo**: API key loaded from `.env` file, searched in multiple locations

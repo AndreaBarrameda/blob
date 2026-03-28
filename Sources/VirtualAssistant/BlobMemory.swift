@@ -1,118 +1,134 @@
 import Foundation
 import Combine
 
-struct Memory: Codable {
-    let fact: String
-    let timestamp: Date
-    let category: String  // "preference", "fact", "interest", etc.
-
-    enum CodingKeys: String, CodingKey {
-        case fact, timestamp, category
-    }
-
-    init(fact: String, timestamp: Date, category: String) {
-        self.fact = fact
-        self.timestamp = timestamp
-        self.category = category
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        fact = try container.decode(String.self, forKey: .fact)
-        category = try container.decode(String.self, forKey: .category)
-
-        // Handle both string and double timestamps
-        if let doubleTime = try? container.decode(Double.self, forKey: .timestamp) {
-            timestamp = Date(timeIntervalSince1970: doubleTime)
-        } else if let stringTime = try? container.decode(String.self, forKey: .timestamp),
-                  let doubleTime = Double(stringTime) {
-            timestamp = Date(timeIntervalSince1970: doubleTime)
-        } else {
-            timestamp = Date()
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(fact, forKey: .fact)
-        try container.encode(category, forKey: .category)
-        try container.encode(timestamp.timeIntervalSince1970, forKey: .timestamp)
-    }
-}
-
 class BlobMemory: ObservableObject {
-    @Published var memories: [Memory] = []
-    private let memoryFile = "/Users/andreabarrameda/VirtualAssistant/.blob_memory.json"
+    @Published var entries: [String] = []
+    let memoryFile: String
 
     init() {
-        loadMemories()
+        // MEMORY.md lives next to the executable's project root
+        let projectRoot: String
+        if let execURL = Bundle.main.executableURL {
+            // .build/debug/VirtualAssistant -> go up 3 levels to project root
+            projectRoot = execURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+        } else {
+            projectRoot = FileManager.default.currentDirectoryPath
+        }
+        self.memoryFile = projectRoot + "/MEMORY.md"
+        loadEntries()
     }
 
-    private func loadMemories() {
-        if FileManager.default.fileExists(atPath: memoryFile) {
-            do {
-                let data = try Data(contentsOf: URL(fileURLWithPath: memoryFile))
-                memories = try JSONDecoder().decode([Memory].self, from: data)
-            } catch {
-                print("⚠️ Failed to load memories: \(error)")
-                memories = []
-            }
-        }
+    // Create the file with a header if it doesn't exist
+    func ensureFileExists() {
+        guard !FileManager.default.fileExists(atPath: memoryFile) else { return }
+        let header = """
+        # Blob Memory
+
+        Everything Blob knows about the user. Newest entries at the top.
+
+        ---
+
+        """
+        try? header.write(toFile: memoryFile, atomically: true, encoding: .utf8)
+        print("🧠 Created MEMORY.md at \(memoryFile)")
     }
 
-    private func saveMemories() {
-        do {
-            let data = try JSONEncoder().encode(memories)
-            try data.write(to: URL(fileURLWithPath: memoryFile))
-        } catch {
-            print("⚠️ Failed to save memories: \(error)")
+    private func loadEntries() {
+        ensureFileExists()
+        guard let content = try? String(contentsOfFile: memoryFile, encoding: .utf8) else {
+            entries = []
+            return
         }
+        // Parse entries — each starts with "### "
+        entries = content.components(separatedBy: "\n### ")
+            .dropFirst() // skip header
+            .map { "### " + $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
-    func addMemory(_ fact: String, category: String = "fact") {
-        let memory = Memory(fact: fact, timestamp: Date(), category: category)
-        memories.append(memory)
-        saveMemories()
+    func addEntry(_ fact: String, category: String = "observation") {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        formatter.timeZone = TimeZone.current
+        let timestamp = formatter.string(from: Date())
+
+        let entry = "### \(timestamp) — \(category)\n\(fact)\n"
+
+        // Prepend to file (newest at top, after header)
+        ensureFileExists()
+        guard var content = try? String(contentsOfFile: memoryFile, encoding: .utf8) else { return }
+
+        // Find the "---" separator after the header
+        if let separatorRange = content.range(of: "---\n") {
+            let insertPoint = separatorRange.upperBound
+            content.insert(contentsOf: "\n" + entry, at: insertPoint)
+        } else {
+            content += "\n" + entry
+        }
+
+        try? content.write(toFile: memoryFile, atomically: true, encoding: .utf8)
+        entries.insert(entry, at: 0)
     }
 
-    func getMemorySummary() -> String {
-        guard !memories.isEmpty else {
-            return "I don't have any memories yet."
+    // Returns the most recent entries as context for the LLM
+    func getMemorySummary(limit: Int = 15) -> String {
+        guard !entries.isEmpty else {
+            return ""
         }
 
-        let recentMemories = memories.suffix(10)  // Last 10 memories
-        let facts = recentMemories
-            .filter { $0.category == "fact" }
-            .map { $0.fact }
+        let recent = entries.prefix(limit)
+        let facts = recent.compactMap { entry -> String? in
+            // Extract just the fact text (skip the "### timestamp — category" line)
+            let lines = entry.split(separator: "\n", maxSplits: 1)
+            guard lines.count > 1 else { return nil }
+            return String(lines[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
 
-        let preferences = recentMemories
-            .filter { $0.category == "preference" }
-            .map { $0.fact }
-
-        var summary = ""
-        if !facts.isEmpty {
-            summary += "I know: \(facts.joined(separator: ", ")). "
-        }
-        if !preferences.isEmpty {
-            summary += "User preferences: \(preferences.joined(separator: ", ")). "
-        }
-
-        return summary
+        guard !facts.isEmpty else { return "" }
+        return "What you remember about the user:\n" + facts.joined(separator: "\n")
     }
 
     func extractMemories(from conversation: String, usingOpenAI openAI: OpenAIClient, completion: @escaping () -> Void) {
-        // Use AI to extract important facts from conversation
+        let existingContext = getMemorySummary(limit: 10)
         let prompt = """
-        From this conversation, extract 1-2 important facts or preferences to remember about the user.
-        Format as: "User likes X" or "User is working on Y" - keep it short.
+        You are Blob's memory system. From this conversation, extract 1-2 facts worth remembering about the user.
+        Keep each fact to ONE short line. Format: just the fact, no bullets or prefixes.
+        Only extract genuinely useful things (preferences, habits, projects, relationships, opinions).
+        Skip generic observations like "user is typing" or "user sent a message".
+        \(existingContext.isEmpty ? "" : "\nYou already know:\n\(existingContext)\nDon't repeat things you already know.")
+
         Conversation: \(conversation)
         """
 
-        openAI.chat(message: prompt) { [weak self] response in
-            if response.count > 5 {
-                self?.addMemory(response, category: "fact")
+        openAI.chat(message: prompt) { [weak self] response, _ in
+            let cleaned = response.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleaned.count > 5 && !cleaned.lowercased().contains("no new") && !cleaned.lowercased().contains("nothing new") {
+                self?.addEntry(cleaned, category: "conversation")
             }
             completion()
         }
     }
+
+    // Legacy compatibility for ImportMemoriesView/ExportMemoriesView
+    var memories: [LegacyMemory] {
+        entries.compactMap { entry in
+            let lines = entry.split(separator: "\n", maxSplits: 1)
+            guard lines.count > 1 else { return nil }
+            let fact = String(lines[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return LegacyMemory(fact: fact, timestamp: Date(), category: "fact")
+        }
+    }
+
+    func addMemory(_ fact: String, category: String = "fact") {
+        addEntry(fact, category: category)
+    }
+}
+
+struct LegacyMemory {
+    let fact: String
+    let timestamp: Date
+    let category: String
 }

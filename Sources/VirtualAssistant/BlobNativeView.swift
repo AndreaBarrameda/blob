@@ -1,29 +1,50 @@
 import AppKit
 
 enum BlobMood: String, Codable {
-    case curious    // 😳 wide eyes, blue glow
-    case thoughtful // 🤔 narrow eyes, purple glow
-    case playful    // 😄 happy eyes, pink glow
-    case alert      // ⚡ very wide eyes, red glow
-    case angry      // 😠 narrow angry eyes, dark red glow
-    case annoyed    // 🙄 flat, irritated eyes, amber glow
-    case offended   // 😤 indignant eyes, rose glow
-    case afraid     // 😨 very wide eyes, pale glow
-    case delighted  // ✨ bright, excited eyes, gold glow
-    case content    // 🫧 normal, soft glow
+    case curious
+    case thoughtful
+    case playful
+    case alert
+    case angry
+    case annoyed
+    case offended
+    case afraid
+    case delighted
+    case content
 }
 
 class BlobNativeView: NSView {
-    var scale: CGFloat = 1.0
+    // Animation state
     var bobOffset: CGFloat = 0
+    var scaleX: CGFloat = 1.0
+    var scaleY: CGFloat = 1.0
     var pupilOffsetX: CGFloat = 0
     var pupilOffsetY: CGFloat = 0
     var eyeBlinkScale: CGFloat = 1.0
     var mouseLocation = NSPoint.zero
     var isResponding = false
     var mood: BlobMood = .content
-    var currentMood: BlobMood { mood }  // Public accessor for reading current mood
-    var eyeWidenFactor: CGFloat = 1.0  // 1.4 = wide (curious), 0.85 = narrow (thoughtful)
+    var currentMood: BlobMood { mood }
+    var eyeWidenFactor: CGFloat = 1.0
+
+    // Smooth pupil tracking
+    private var targetPupilOffsetX: CGFloat = 0
+    private var targetPupilOffsetY: CGFloat = 0
+
+    // Micro-movement state
+    private var animationTime: CFTimeInterval = 0
+    private var idleOffsetX: CGFloat = 0
+    private var idleOffsetY: CGFloat = 0
+
+    // Organic blob shape constants
+    private let vertexCount = 64
+    private let waveComponents: [(freq: CGFloat, amp: CGFloat, phase: CGFloat, speed: CGFloat)] = [
+        (3, 0.035, 0.0, 1.0),
+        (5, 0.020, 1.3, 0.7),
+        (7, 0.012, 2.7, 1.3),
+    ]
+
+    // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -31,52 +52,101 @@ class BlobNativeView: NSView {
         NSColor.clear.setFill()
         dirtyRect.fill()
 
-        let center = CGPoint(x: bounds.midX, y: bounds.midY + bobOffset)
-        let radius = min(bounds.width, bounds.height) / 3 * scale
+        let time = animationTime
+        let center = CGPoint(x: bounds.midX + idleOffsetX, y: bounds.midY + bobOffset + idleOffsetY)
+        let baseRadius = min(bounds.width, bounds.height) / 4.5
+        let radiusX = baseRadius * scaleX
+        let radiusY = baseRadius * scaleY
 
-        // Draw blob with pulsing effect
-        let blobPath = NSBezierPath(ovalIn: NSRect(
-            x: center.x - radius,
-            y: center.y - radius,
-            width: radius * 2,
-            height: radius * 2
-        ))
-
-        // Mood-based glow
         let (glowColor, bodyColor, borderColor) = moodColors()
 
-        // Draw mood-based glow aura (concentric circles)
-        let glowRadii: [CGFloat] = [radius * 1.6, radius * 1.35, radius * 1.1]
-        let glowAlphas: [CGFloat] = [0.15, 0.25, 0.35]
-
-        for (index, glowRadius) in glowRadii.enumerated() {
-            let glowPath = NSBezierPath(ovalIn: NSRect(
-                x: center.x - glowRadius,
-                y: center.y - glowRadius,
-                width: glowRadius * 2,
-                height: glowRadius * 2
-            ))
-            glowColor.withAlphaComponent(glowAlphas[index]).setFill()
+        // Glow aura — 8 organic rings fading outward, pulsing with breath
+        let breathFactor = (scaleX + scaleY) / 2.0 - 1.0  // positive when breathing in
+        let glowSteps = 8
+        for i in 0..<glowSteps {
+            let t = CGFloat(i) / CGFloat(glowSteps - 1)
+            let glowScale = 1.05 + t * 0.6
+            let breathBoost: CGFloat = 1.0 + max(breathFactor, 0) * 0.3
+            let grx = radiusX * glowScale * breathBoost
+            let gry = radiusY * glowScale * breathBoost
+            let alpha = 0.30 * (1.0 - t)
+            let glowPath = blobBodyPath(center: center, radiusX: grx, radiusY: gry, time: time)
+            glowColor.withAlphaComponent(alpha).setFill()
             glowPath.fill()
         }
 
+        // Body
+        let bodyPath = blobBodyPath(center: center, radiusX: radiusX, radiusY: radiusY, time: time)
+
         if isResponding {
             glowColor.withAlphaComponent(0.5).setFill()
-            blobPath.fill()
+            bodyPath.fill()
         }
 
         bodyColor.setFill()
-        blobPath.fill()
+        bodyPath.fill()
         borderColor.setStroke()
-        blobPath.lineWidth = 2
-        blobPath.stroke()
+        bodyPath.lineWidth = 2
+        bodyPath.stroke()
 
-        // Draw eyes with blinking, mood expression, and following
+        // Eyes
+        drawEyes(center: center, borderColor: borderColor)
+
+        // Mouth
+        drawMouth(center: center, borderColor: borderColor)
+    }
+
+    // MARK: - Organic Body Path
+
+    private func blobBodyPath(center: CGPoint, radiusX: CGFloat, radiusY: CGFloat, time: CFTimeInterval) -> NSBezierPath {
+        let n = vertexCount
+        var points = [CGPoint]()
+
+        for i in 0..<n {
+            let angle = 2.0 * .pi * CGFloat(i) / CGFloat(n)
+            var displacement: CGFloat = 0
+            for w in waveComponents {
+                displacement += w.amp * sin(angle * w.freq + CGFloat(time) * w.speed + w.phase)
+            }
+            let rx = radiusX * (1.0 + displacement)
+            let ry = radiusY * (1.0 + displacement)
+            let x = center.x + rx * cos(angle)
+            let y = center.y + ry * sin(angle)
+            points.append(CGPoint(x: x, y: y))
+        }
+
+        // Build smooth closed path via Catmull-Rom to cubic Bezier conversion
+        let path = NSBezierPath()
+        let tension: CGFloat = 6.0
+
+        for i in 0..<n {
+            let p0 = points[(i - 1 + n) % n]
+            let p1 = points[i]
+            let p2 = points[(i + 1) % n]
+            let p3 = points[(i + 2) % n]
+
+            let cp1 = CGPoint(
+                x: p1.x + (p2.x - p0.x) / tension,
+                y: p1.y + (p2.y - p0.y) / tension
+            )
+            let cp2 = CGPoint(
+                x: p2.x - (p3.x - p1.x) / tension,
+                y: p2.y - (p3.y - p1.y) / tension
+            )
+
+            if i == 0 { path.move(to: p1) }
+            path.curve(to: p2, controlPoint1: cp1, controlPoint2: cp2)
+        }
+        path.close()
+        return path
+    }
+
+    // MARK: - Eyes
+
+    private func drawEyes(center: CGPoint, borderColor: NSColor) {
         let baseEyeRadius: CGFloat = 8 * eyeWidenFactor
         let eyeSpacing: CGFloat = 16
         let eyeY = center.y + 20
-
-        // Calculate pupil position based on mouse follow
         let pupilRadius: CGFloat = (3 * eyeBlinkScale) + (eyeWidenFactor - 1.0) * 2
 
         // Left eye
@@ -118,12 +188,75 @@ class BlobNativeView: NSView {
         rightPupilPath.fill()
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        mouseLocation = event.locationInWindow
-        updatePupilPosition()
+    // MARK: - Mouth
+
+    private func drawMouth(center: CGPoint, borderColor: NSColor) {
+        let mouthY = center.y + 2
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        path.lineCapStyle = .round
+
+        switch mood {
+        case .content:
+            // Gentle smile
+            path.move(to: NSPoint(x: center.x - 8, y: mouthY))
+            path.curve(to: NSPoint(x: center.x + 8, y: mouthY),
+                       controlPoint1: NSPoint(x: center.x - 3, y: mouthY + 4),
+                       controlPoint2: NSPoint(x: center.x + 3, y: mouthY + 4))
+
+        case .playful, .delighted:
+            // Wide smile
+            path.move(to: NSPoint(x: center.x - 11, y: mouthY))
+            path.curve(to: NSPoint(x: center.x + 11, y: mouthY),
+                       controlPoint1: NSPoint(x: center.x - 4, y: mouthY + 6),
+                       controlPoint2: NSPoint(x: center.x + 4, y: mouthY + 6))
+
+        case .angry:
+            // Downturned frown
+            path.move(to: NSPoint(x: center.x - 8, y: mouthY + 2))
+            path.curve(to: NSPoint(x: center.x + 8, y: mouthY + 2),
+                       controlPoint1: NSPoint(x: center.x - 3, y: mouthY - 4),
+                       controlPoint2: NSPoint(x: center.x + 3, y: mouthY - 4))
+
+        case .annoyed:
+            // Flat line
+            path.move(to: NSPoint(x: center.x - 7, y: mouthY))
+            path.line(to: NSPoint(x: center.x + 7, y: mouthY))
+
+        case .afraid, .alert:
+            // Small O
+            path.appendOval(in: NSRect(x: center.x - 4, y: mouthY - 3, width: 8, height: 6))
+
+        case .curious:
+            // Slightly open
+            path.appendOval(in: NSRect(x: center.x - 3, y: mouthY - 2, width: 6, height: 4))
+
+        case .thoughtful:
+            // Slight pout
+            path.move(to: NSPoint(x: center.x - 6, y: mouthY))
+            path.curve(to: NSPoint(x: center.x + 6, y: mouthY),
+                       controlPoint1: NSPoint(x: center.x - 2, y: mouthY - 2),
+                       controlPoint2: NSPoint(x: center.x + 2, y: mouthY - 2))
+
+        case .offended:
+            // Tight pursed line
+            path.move(to: NSPoint(x: center.x - 4, y: mouthY))
+            path.line(to: NSPoint(x: center.x + 4, y: mouthY))
+            path.lineWidth = 2.0
+        }
+
+        borderColor.setStroke()
+        path.stroke()
     }
 
-    private func updatePupilPosition() {
+    // MARK: - Mouse Tracking
+
+    override func mouseMoved(with event: NSEvent) {
+        mouseLocation = event.locationInWindow
+        updatePupilTarget()
+    }
+
+    private func updatePupilTarget() {
         guard let window = window else { return }
         let windowCenter = CGPoint(x: window.frame.midX, y: window.frame.midY)
 
@@ -133,35 +266,49 @@ class BlobNativeView: NSView {
 
         if distance > 0 {
             let maxOffset: CGFloat = 3
-            pupilOffsetX = (dx / distance) * maxOffset
-            pupilOffsetY = (dy / distance) * maxOffset
-            setNeedsDisplay(bounds)
+            targetPupilOffsetX = (dx / distance) * maxOffset
+            targetPupilOffsetY = (dy / distance) * maxOffset
         }
     }
 
+    // MARK: - Animations
+
     func startAnimations() {
-        // Breathing animation with pulsing
         Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.scale = 1.0 + sin(Date().timeIntervalSince1970) * 0.08
+            let time = Date().timeIntervalSince1970
+            self.animationTime = time
+
+            // Breathing with subtle amplitude variation
+            let breathAmpVariation = sin(time * 0.13) * 0.02
+            let breathe = sin(time) * (0.08 + breathAmpVariation)
+
+            // Bobbing
+            let bob = sin(time * 0.5)
+            self.bobOffset = bob * 8
+
+            // Squash & stretch from bob velocity
+            let bobVelocity = cos(time * 0.5) * 0.5
+            let squashStretch: CGFloat = 0.025
+            let stretchY = bobVelocity * squashStretch
+            self.scaleX = (1.0 + breathe) * (1.0 - stretchY)
+            self.scaleY = (1.0 + breathe) * (1.0 + stretchY)
+
+            // Idle drift — layered slow sine waves for organic feel
+            self.idleOffsetX = sin(time * 0.3) * 1.5 + sin(time * 0.17) * 0.8
+            self.idleOffsetY = cos(time * 0.21) * 1.2 + cos(time * 0.23) * 0.6
+
+            // Smooth pupil lerp
+            let lerpFactor: CGFloat = 0.15
+            self.pupilOffsetX += (self.targetPupilOffsetX - self.pupilOffsetX) * lerpFactor
+            self.pupilOffsetY += (self.targetPupilOffsetY - self.pupilOffsetY) * lerpFactor
+
             self.setNeedsDisplay(self.bounds)
         }
 
-        // Bobbing animation
-        Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            self.bobOffset = sin(Date().timeIntervalSince1970 * 0.5) * 8
-            self.setNeedsDisplay(self.bounds)
-        }
+        scheduleNextBlink()
 
-        // Blinking animation - random intervals
-        Timer.scheduledTimer(withTimeInterval: Double.random(in: 3...7), repeats: true) { [weak self] _ in
-            self?.blink()
-        }
-
-        // Enable mouse tracking
         self.window?.acceptsMouseMovedEvents = true
-
         let trackingArea = NSTrackingArea(
             rect: self.bounds,
             options: [.mouseMoved, .activeAlways, .inVisibleRect],
@@ -169,6 +316,19 @@ class BlobNativeView: NSView {
             userInfo: nil
         )
         self.addTrackingArea(trackingArea)
+    }
+
+    private func scheduleNextBlink() {
+        Timer.scheduledTimer(withTimeInterval: Double.random(in: 3...7), repeats: false) { [weak self] _ in
+            self?.blink()
+            // 15% chance of a quick double-blink
+            if Double.random(in: 0...1) < 0.15 {
+                Timer.scheduledTimer(withTimeInterval: 0.45, repeats: false) { [weak self] _ in
+                    self?.blink()
+                }
+            }
+            self?.scheduleNextBlink()
+        }
     }
 
     private func blink() {
@@ -187,7 +347,6 @@ class BlobNativeView: NSView {
                 self.eyeBlinkScale = 1.0
                 timer.invalidate()
             }
-            self.setNeedsDisplay(self.bounds)
         }
     }
 
@@ -199,25 +358,19 @@ class BlobNativeView: NSView {
         }
     }
 
+    // MARK: - Mood
+
     func setMood(_ newMood: BlobMood, animated: Bool = true) {
         let targetEyeWiden: CGFloat
         switch newMood {
-        case .curious:
-            targetEyeWiden = 1.4  // Wide eyes
-        case .alert:
-            targetEyeWiden = 1.5  // Very wide
-        case .afraid:
-            targetEyeWiden = 1.65  // Panic wide
-        case .angry:
-            targetEyeWiden = 0.7  // Narrow angry eyes
-        case .annoyed:
-            targetEyeWiden = 0.82  // Flat irritated eyes
-        case .offended:
-            targetEyeWiden = 0.9  // Slightly narrowed, indignant
-        case .thoughtful:
-            targetEyeWiden = 0.8  // Narrow
-        case .playful, .content, .delighted:
-            targetEyeWiden = 1.0  // Normal
+        case .curious:     targetEyeWiden = 1.4
+        case .alert:       targetEyeWiden = 1.5
+        case .afraid:      targetEyeWiden = 1.65
+        case .angry:       targetEyeWiden = 0.7
+        case .annoyed:     targetEyeWiden = 0.82
+        case .offended:    targetEyeWiden = 0.9
+        case .thoughtful:  targetEyeWiden = 0.8
+        case .playful, .content, .delighted: targetEyeWiden = 1.0
         }
 
         if animated {
@@ -245,6 +398,8 @@ class BlobNativeView: NSView {
             setNeedsDisplay(bounds)
         }
     }
+
+    // MARK: - Colors
 
     private func moodColors() -> (glow: NSColor, body: NSColor, border: NSColor) {
         switch mood {
@@ -310,6 +465,8 @@ class BlobNativeView: NSView {
             )
         }
     }
+
+    // MARK: - Interaction
 
     override func mouseDown(with event: NSEvent) {
         NotificationCenter.default.post(name: NSNotification.Name("BlobTapped"), object: nil)

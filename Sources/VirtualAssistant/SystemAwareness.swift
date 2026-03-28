@@ -5,30 +5,76 @@ class SystemAwareness {
     static func getDetailedSystemInfo() -> String {
         var info = ""
 
-        // CPU and Memory - simplified estimates
-        let cpuUsage = Int.random(in: 10...70)
-        let memoryUsage = Int.random(in: 20...80)
-        info += "💻 CPU: \(cpuUsage)% | Memory: \(memoryUsage)%\n"
+        let cpuUsage = getCPUUsage()
+        let memoryUsage = getMemoryUsage()
+        info += "CPU: \(cpuUsage)% | Memory: \(memoryUsage)%\n"
 
-        // Disk Space
-        let diskSpace = Int.random(in: 30...90)
-        info += "💾 Disk: \(diskSpace)% full\n"
+        let diskSpace = getDiskUsage()
+        info += "Disk: \(diskSpace)% full\n"
 
-        // Network Activity
         if isNetworkActive() {
-            info += "🌐 Network: Active (downloading/uploading)\n"
+            info += "Network: Active (downloading/uploading)\n"
         }
 
-        // Recent Files
         if let recentFiles = getRecentFiles() {
-            info += "📂 Recent file: \(recentFiles)\n"
+            info += "Recent file: \(recentFiles)\n"
         }
 
         return info
     }
 
+    private static func getCPUUsage() -> Int {
+        var loadInfo = host_cpu_load_info()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<host_cpu_load_info_data_t>.size / MemoryLayout<integer_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &loadInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        let user = Double(loadInfo.cpu_ticks.0)
+        let system = Double(loadInfo.cpu_ticks.1)
+        let idle = Double(loadInfo.cpu_ticks.2)
+        let nice = Double(loadInfo.cpu_ticks.3)
+        let total = user + system + idle + nice
+        guard total > 0 else { return 0 }
+        return Int(((user + system + nice) / total) * 100)
+    }
+
+    private static func getMemoryUsage() -> Int {
+        let totalMemory = ProcessInfo.processInfo.physicalMemory
+        var stats = vm_statistics64()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &stats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        let pageSize = UInt64(vm_kernel_page_size)
+        let active = UInt64(stats.active_count) * pageSize
+        let wired = UInt64(stats.wire_count) * pageSize
+        let compressed = UInt64(stats.compressor_page_count) * pageSize
+        let used = active + wired + compressed
+        return Int((Double(used) / Double(totalMemory)) * 100)
+    }
+
+    private static func getDiskUsage() -> Int {
+        guard let attrs = try? FileManager.default.attributesOfFileSystem(
+            forPath: NSHomeDirectory()
+        ),
+        let totalSpace = attrs[.systemSize] as? Int64,
+        let freeSpace = attrs[.systemFreeSize] as? Int64,
+        totalSpace > 0 else { return 0 }
+        let used = totalSpace - freeSpace
+        return Int((Double(used) / Double(totalSpace)) * 100)
+    }
+
     private static func isNetworkActive() -> Bool {
-        // Simplified - check if any network-related apps are running
         let networkApps = ["Safari", "Chrome", "Firefox", "Mail", "Discord", "Slack", "Telegram"]
         if let frontApp = NSWorkspace.shared.frontmostApplication {
             let appName = frontApp.localizedName ?? ""
@@ -40,7 +86,6 @@ class SystemAwareness {
     private static func getRecentFiles() -> String? {
         let fileManager = FileManager.default
 
-        // Get recently modified files from common locations
         guard let docsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
             return nil
         }

@@ -7,3 +7,6 @@
 DerivedData/
 .env
 .env.local
+blob_memory.json
+MEMORY.md
+CONVERSATION.md
