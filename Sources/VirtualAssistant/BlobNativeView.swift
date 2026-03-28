@@ -6,6 +6,10 @@ enum BlobMood: String, Codable {
     case playful    // 😄 happy eyes, pink glow
     case alert      // ⚡ very wide eyes, red glow
     case angry      // 😠 narrow angry eyes, dark red glow
+    case annoyed    // 🙄 flat, irritated eyes, amber glow
+    case offended   // 😤 indignant eyes, rose glow
+    case afraid     // 😨 very wide eyes, pale glow
+    case delighted  // ✨ bright, excited eyes, gold glow
     case content    // 🫧 normal, soft glow
 }
 
@@ -18,6 +22,7 @@ class BlobNativeView: NSView {
     var mouseLocation = NSPoint.zero
     var isResponding = false
     var mood: BlobMood = .content
+    var currentMood: BlobMood { mood }  // Public accessor for reading current mood
     var eyeWidenFactor: CGFloat = 1.0  // 1.4 = wide (curious), 0.85 = narrow (thoughtful)
 
     override func draw(_ dirtyRect: NSRect) {
@@ -201,11 +206,17 @@ class BlobNativeView: NSView {
             targetEyeWiden = 1.4  // Wide eyes
         case .alert:
             targetEyeWiden = 1.5  // Very wide
+        case .afraid:
+            targetEyeWiden = 1.65  // Panic wide
         case .angry:
             targetEyeWiden = 0.7  // Narrow angry eyes
+        case .annoyed:
+            targetEyeWiden = 0.82  // Flat irritated eyes
+        case .offended:
+            targetEyeWiden = 0.9  // Slightly narrowed, indignant
         case .thoughtful:
             targetEyeWiden = 0.8  // Narrow
-        case .playful, .content:
+        case .playful, .content, .delighted:
             targetEyeWiden = 1.0  // Normal
         }
 
@@ -239,39 +250,63 @@ class BlobNativeView: NSView {
         switch mood {
         case .curious:
             return (
-                NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 0.6),  // Cyan glow
-                NSColor(red: 0.7, green: 0.8, blue: 1.0, alpha: 1),    // Light blue body
-                NSColor(red: 0.4, green: 0.6, blue: 0.9, alpha: 1)     // Blue border
+                NSColor(red: 0.22, green: 0.82, blue: 1.0, alpha: 0.7),
+                NSColor(red: 0.62, green: 0.9, blue: 1.0, alpha: 1),
+                NSColor(red: 0.12, green: 0.62, blue: 0.9, alpha: 1)
             )
         case .thoughtful:
             return (
-                NSColor(red: 0.9, green: 0.6, blue: 1.0, alpha: 0.6),  // Purple glow
-                NSColor(red: 0.8, green: 0.7, blue: 0.95, alpha: 1),   // Soft purple body
-                NSColor(red: 0.6, green: 0.4, blue: 0.85, alpha: 1)    // Purple border
+                NSColor(red: 0.55, green: 0.45, blue: 1.0, alpha: 0.65),
+                NSColor(red: 0.78, green: 0.75, blue: 0.98, alpha: 1),
+                NSColor(red: 0.42, green: 0.3, blue: 0.82, alpha: 1)
             )
         case .playful:
             return (
-                NSColor(red: 1.0, green: 0.7, blue: 0.9, alpha: 0.6),  // Pink glow
-                NSColor(red: 1.0, green: 0.8, blue: 0.95, alpha: 1),   // Light pink body
-                NSColor(red: 0.9, green: 0.5, blue: 0.8, alpha: 1)     // Pink border
+                NSColor(red: 1.0, green: 0.48, blue: 0.78, alpha: 0.7),
+                NSColor(red: 1.0, green: 0.78, blue: 0.9, alpha: 1),
+                NSColor(red: 0.9, green: 0.28, blue: 0.64, alpha: 1)
             )
         case .alert:
             return (
-                NSColor(red: 1.0, green: 0.4, blue: 0.4, alpha: 0.6),  // Red glow
-                NSColor(red: 1.0, green: 0.7, blue: 0.7, alpha: 1),    // Light red body
-                NSColor(red: 0.9, green: 0.3, blue: 0.3, alpha: 1)     // Red border
+                NSColor(red: 1.0, green: 0.2, blue: 0.16, alpha: 0.72),
+                NSColor(red: 1.0, green: 0.66, blue: 0.5, alpha: 1),
+                NSColor(red: 0.84, green: 0.16, blue: 0.12, alpha: 1)
             )
         case .angry:
             return (
-                NSColor(red: 0.95, green: 0.3, blue: 0.3, alpha: 0.6),  // Dark red glow
-                NSColor(red: 1.0, green: 0.6, blue: 0.6, alpha: 1),     // Red body
-                NSColor(red: 0.85, green: 0.2, blue: 0.2, alpha: 1)     // Dark red border
+                NSColor(red: 0.72, green: 0.05, blue: 0.08, alpha: 0.78),
+                NSColor(red: 0.93, green: 0.34, blue: 0.3, alpha: 1),
+                NSColor(red: 0.52, green: 0.04, blue: 0.06, alpha: 1)
+            )
+        case .annoyed:
+            return (
+                NSColor(red: 0.98, green: 0.62, blue: 0.12, alpha: 0.68),
+                NSColor(red: 1.0, green: 0.84, blue: 0.52, alpha: 1),
+                NSColor(red: 0.78, green: 0.46, blue: 0.08, alpha: 1)
+            )
+        case .offended:
+            return (
+                NSColor(red: 1.0, green: 0.22, blue: 0.54, alpha: 0.72),
+                NSColor(red: 1.0, green: 0.7, blue: 0.82, alpha: 1),
+                NSColor(red: 0.8, green: 0.12, blue: 0.4, alpha: 1)
+            )
+        case .afraid:
+            return (
+                NSColor(red: 0.62, green: 0.86, blue: 1.0, alpha: 0.58),
+                NSColor(red: 0.9, green: 0.97, blue: 1.0, alpha: 1),
+                NSColor(red: 0.4, green: 0.64, blue: 0.82, alpha: 1)
+            )
+        case .delighted:
+            return (
+                NSColor(red: 1.0, green: 0.82, blue: 0.12, alpha: 0.74),
+                NSColor(red: 1.0, green: 0.94, blue: 0.56, alpha: 1),
+                NSColor(red: 0.88, green: 0.62, blue: 0.04, alpha: 1)
             )
         case .content:
             return (
-                NSColor(red: 0.8, green: 0.7, blue: 1.0, alpha: 0.6),  // Soft purple glow
-                NSColor(red: 0.7, green: 0.6, blue: 0.9, alpha: 1),    // Normal purple body
-                NSColor(red: 0.5, green: 0.4, blue: 0.8, alpha: 1)     // Normal border
+                NSColor(red: 0.44, green: 0.92, blue: 0.72, alpha: 0.58),
+                NSColor(red: 0.72, green: 0.95, blue: 0.84, alpha: 1),
+                NSColor(red: 0.26, green: 0.7, blue: 0.52, alpha: 1)
             )
         }
     }

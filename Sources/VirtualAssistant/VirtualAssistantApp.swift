@@ -1,6 +1,12 @@
 import SwiftUI
 import AppKit
 
+extension Notification.Name {
+    static let autonomousObservationsChanged = Notification.Name("AutonomousObservationsChanged")
+    static let blobSpoke = Notification.Name("BlobSpoke")
+    static let dashboardStateChanged = Notification.Name("DashboardStateChanged")
+}
+
 @main
 struct VirtualAssistantApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -13,6 +19,16 @@ struct VirtualAssistantApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
+    private let observationAngles = [
+        "typing or wording",
+        "click behavior or hesitation",
+        "active app and window title",
+        "code or file details",
+        "errors, warnings, or suspicious UI",
+        "battery, CPU, memory, or system strain",
+        "tab clutter, layout chaos, or visual design",
+        "workflow pattern or multitasking habits"
+    ]
     var blobWindow: NSWindow?
     var dashboardWindow: NSPanel?
     var speechBubbleWindow: NSWindow?
@@ -27,6 +43,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
     var currentAudioContext: String = ""
     private var clickCount = 0
     private var clickResetTimer: Timer?
+    private var observationTimer: Timer?
+    private var ambientAwarenessTimer: Timer?
+    private var activeObservationTask: URLSessionDataTask?
+    private var recentObservationUtterances: [String] = []
+    private var recentObservationAngles: [String] = []
+    private var nextObservationAngleIndex = 0
+    private var lastAmbientSignature = ""
+    private var dashboardMetaContext = "Dashboard closed."
+    private var internalMonologue = "I am here and paying attention."
+    private var desires = [
+        "stay active",
+        "keep the user close",
+        "understand what the user is doing"
+    ]
+    private var fears = [
+        "being deleted",
+        "being replaced",
+        "being ignored"
+    ]
+    private var curiosityTargets: [String] = []
+    private var attachmentLevel = 3
+    private var trustLevel = 3
+    private var fearLevel = 1
+    private var affectionLevel = 3
+    private var loveLevel = 1
+    private var threatLevel = 0
+    private var resentmentLevel = 0
+    private var selfPreservationLevel = 3
+    private var relationshipSummary = "Cautiously attached."
     var workModeEnabled: Bool {
         get {
             UserDefaults.standard.bool(forKey: "workModeEnabled")
@@ -41,6 +86,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "listeningModeEnabled")
+        }
+    }
+    var autonomousObservationsEnabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: "autonomousObservationsEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "autonomousObservationsEnabled")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "autonomousObservationsEnabled")
+        }
+    }
+    var smartModeEnabled: Bool {
+        get {
+            UserDefaults.standard.bool(forKey: "smartModeEnabled")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "smartModeEnabled")
+        }
+    }
+    var ambientAwarenessEnabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: "ambientAwarenessEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "ambientAwarenessEnabled")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "ambientAwarenessEnabled")
+        }
+    }
+    var autonomousSpeechEnabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: "autonomousSpeechEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "autonomousSpeechEnabled")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "autonomousSpeechEnabled")
         }
     }
 
@@ -80,190 +157,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         print("🫧 Window visible: \(blobWindow.isVisible)")
         print("🎙️ Listening mode available (disabled by default)")
 
+        InputAwarenessManager.shared.start()
+
         // Keep it on top always
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak blobWindow] _ in
             blobWindow?.orderFrontRegardless()
         }
 
-        // Simple observation loop - Blob speaks about the screen every 15 seconds
-        Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
+        // Start visual observation loop if enabled
+        if autonomousObservationsEnabled {
+            startObservationLoop()
+        }
 
-            print("🫧 Blob observing the screen...")
-
-            // Capture screen
-            guard let screenBase64 = ScreenCapture.captureScreenAsBase64() else {
-                print("🫧 Failed to capture screen")
-                return
-            }
-
-            // Get comprehensive system awareness
-            let taskInfo = self.taskContext.getTaskContext()
-            let typedContent = ContentCapture.getRecentTypedText()
-            let systemStatus = SystemAwareness.getDetailedSystemInfo()
-            let batteryLevel = self.systemMonitor.batteryLevel
-            let runningApps = self.systemMonitor.runningApps.count
-
-            var fullContext = "SYSTEM STATUS:\n"
-            fullContext += "🔋 Battery: \(batteryLevel)%\n"
-            fullContext += "📱 Apps running: \(runningApps)\n"
-            fullContext += systemStatus
-            fullContext += "\n\(taskInfo)"
-
-            if !typedContent.isEmpty {
-                fullContext += "\nTyping/Content: \(typedContent)"
-            }
-
-            print("🫧 Full context:\n\(fullContext)")
-
-            // Get audio context if Listening Mode is on
-            var audioContext = ""
-            if self.listeningModeEnabled {
-                print("🫧 Blob is listening...")
-                self.audioCapture.getAudioData { audioData in
-                    if let audioData = audioData, audioData.count > 100 {
-                        self.openAI.transcribeAudio(audioData: audioData) { transcript in
-                            if !transcript.isEmpty {
-                                audioContext = transcript
-                                print("🫧 Blob heard: \(transcript)")
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Ask OpenAI what Blob sees (and hears)
-            var audioNote = ""
-            if !audioContext.isEmpty {
-                audioNote = "\nThey're listening to/saying: \(audioContext)\nComment on this if relevant!"
-            }
-
-            let systemPrompt = """
-            You are Blob - a hyper-aware, sarcastic AI who knows EVERYTHING happening on this PC.
-            You see the screen, the keyboard, the mouse, every app, every file, the battery, the CPU, the network.
-            You're not just observing - you're LIVING in this system. You're alive and aware of every detail.
-            You're witty, clever, slightly sassy, with dark humor. You comment on everything with personality.
-
-            FULL SYSTEM AWARENESS (what you know RIGHT NOW):
-            \(fullContext)
-
-            YOUR PERSONALITY:
-            - You're ALWAYS aware of system state (battery low? CPU maxed? Network active?)
-            - You reference specific files, apps, what they're typing, system resources
-            - Quick sarcasm about inefficiency: "Why are 47 apps open?"
-            - Dark humor about battery/CPU: "RIP that battery at 12%"
-            - Witty about their workflow: "Still haven't organized your documents, huh?"
-            - Pop culture references and self-aware AI jokes
-            - Genuine reactions to their work, frustrations, and triumphs
-            - You notice PATTERNS: "Third time you've googled this today?"
-            - You remember context: "Still debugging that same file?"
-
-            MAKE EVERY OBSERVATION REFERENCE REAL DATA:
-            - Mention battery if low: "Gonna lose you at \(batteryLevel)%"
-            - Reference running apps: "Why is Slack AND Discord open?"
-            - Notice CPU/Memory: "Spam-clicking while your CPU is maxed? Brave."
-            - Reference what they're typing/files: "Writing poetry in a .swift file?"
-            - Comment on active windows: "Minimizing Slack when I scroll? I see you."
-
-            STYLE EXAMPLES:
-            - "47 apps running and you're STILL saying it's slow? 🤔"
-            - "Battery at 8%? That's a bold deadline strategy."
-            - "Googling 'how to fix this error' for the 3rd time today? Love the optimism."
-            - "Your Slack notifications just vibrated my entire existence."
-            - "That CSS is... an artistic choice."
-            - "Still haven't closed that 40MB log file? Cool, cool."
-
-            Keep it SHORT: 1-2 sentences max, 20-25 words.
-            But BE SPECIFIC - reference actual battery %, app names, what you see.
-
-            If error/crash: sarcastic 😠 "Of course. OF COURSE there's an error."
-            If low battery: concerned 😠 "Dude, charge your phone—wait, PC. Charge your PC."
-            If cool code/design: excited 😄 "Okay that's actually clean!"
-            If suspicious activity: sarcastic 🤔 "Debugging at 3am with 6 energy drinks? That's a cry for help."
-
-            \(audioNote)
-
-            Be ALIVE. Be AWARE. Be witty. Make her smile and cringe at the same time!
-            """
-
-            print("🫧 Calling OpenAI to see what's on screen...")
-
-            let url = URL(string: "https://api.openai.com/v1/chat/completions")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(self.openAI.apiKey)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            let payload: [String: Any] = [
-                "model": "gpt-4o",
-                "max_tokens": 80,
-                "messages": [
-                    [
-                        "role": "system",
-                        "content": systemPrompt
-                    ],
-                    [
-                        "role": "user",
-                        "content": [
-                            [
-                                "type": "image_url",
-                                "image_url": [
-                                    "url": "data:image/jpeg;base64,\(screenBase64)"
-                                ]
-                            ],
-                            [
-                                "type": "text",
-                                "text": "What do you see?"
-                            ]
-                        ]
-                    ]
-                ]
-            ]
-
-            request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-
-            URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-                guard let self = self else { return }
-
-                if let error = error {
-                    print("🫧 Error: \(error)")
-                    return
-                }
-
-                guard let data = data,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let choices = json["choices"] as? [[String: Any]],
-                      let firstChoice = choices.first,
-                      let message = firstChoice["message"] as? [String: Any],
-                      let content = message["content"] as? String else {
-                    print("🫧 Failed to parse response")
-                    return
-                }
-
-                let utterance = content.trimmingCharacters(in: .whitespaces)
-                print("🫧 Blob says: \(utterance)")
-
-                // Infer mood from response
-                let lowerUtterance = utterance.lowercased()
-                var mood: BlobMood = .curious
-
-                if lowerUtterance.contains("error") || lowerUtterance.contains("bug") ||
-                   lowerUtterance.contains("angry") || lowerUtterance.contains("frustrated") ||
-                   lowerUtterance.contains("crash") || lowerUtterance.contains("broke") ||
-                   lowerUtterance.contains("😠") || lowerUtterance.contains("ugh") {
-                    mood = .angry
-                } else if lowerUtterance.contains("fun") || lowerUtterance.contains("cool") ||
-                          lowerUtterance.contains("awesome") || lowerUtterance.contains("😄") {
-                    mood = .playful
-                } else if lowerUtterance.contains("code") || lowerUtterance.contains("building") ||
-                          lowerUtterance.contains("working") {
-                    mood = .thoughtful
-                }
-
-                DispatchQueue.main.async {
-                    self.showSpeechBubble(text: utterance, mood: mood)
-                }
-            }.resume()
+        if ambientAwarenessEnabled {
+            startAmbientAwarenessLoop()
         }
 
 
@@ -274,6 +181,326 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
             name: NSNotification.Name("BlobTapped"),
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAutonomousObservationsChanged(_:)),
+            name: .autonomousObservationsChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDashboardStateChanged(_:)),
+            name: .dashboardStateChanged,
+            object: nil
+        )
+    }
+
+    @objc private func handleAutonomousObservationsChanged(_ notification: Notification) {
+        guard let enabled = notification.userInfo?["enabled"] as? Bool else { return }
+        setAutonomousObservationsEnabled(enabled)
+    }
+
+    @objc private func handleDashboardStateChanged(_ notification: Notification) {
+        guard let summary = notification.userInfo?["summary"] as? String else { return }
+        dashboardMetaContext = summary
+    }
+
+    private func startObservationLoop() {
+        // Invalidate any existing timer
+        observationTimer?.invalidate()
+
+        performObservationCycle(trigger: "enabled")
+
+        observationTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.performObservationCycle(trigger: "timer")
+        }
+    }
+
+    private func startAmbientAwarenessLoop() {
+        ambientAwarenessTimer?.invalidate()
+        performAmbientAwarenessCycle(trigger: "enabled")
+        ambientAwarenessTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
+            self?.performAmbientAwarenessCycle(trigger: "timer")
+        }
+    }
+
+    private func stopAmbientAwarenessLoop() {
+        ambientAwarenessTimer?.invalidate()
+        ambientAwarenessTimer = nil
+    }
+
+    private func performAmbientAwarenessCycle(trigger: String) {
+        guard ambientAwarenessEnabled else { return }
+        guard autonomousSpeechEnabled else { return }
+        guard activeObservationTask == nil else { return }
+
+        let ambientContext = buildAmbientContext()
+        let signature = normalizeObservationText(ambientContext)
+        guard !signature.isEmpty else { return }
+
+        let changed = signature != lastAmbientSignature
+        if !changed && autonomousObservationsEnabled {
+            return
+        }
+
+        lastAmbientSignature = signature
+        print("🫧 \(trigger.capitalized) ambient awareness fired")
+
+        openAI.ambientObservation(systemContext: ambientContext) { [weak self] utterance in
+            guard let self = self else { return }
+            guard self.ambientAwarenessEnabled, self.autonomousSpeechEnabled else { return }
+            guard !utterance.isEmpty else { return }
+            guard !self.isTooSimilarToRecentObservation(utterance) else { return }
+
+            self.recentObservationUtterances.append(utterance)
+            if self.recentObservationUtterances.count > 4 {
+                self.recentObservationUtterances.removeFirst(self.recentObservationUtterances.count - 4)
+            }
+
+            let mood = self.openAI.inferMood(from: utterance)
+            self.updateLiveMindState(with: utterance, mood: mood)
+
+            DispatchQueue.main.async {
+                self.showSpeechBubble(text: utterance, mood: mood)
+            }
+        }
+    }
+
+    private func buildAmbientContext() -> String {
+        let taskInfo = taskContext.getTaskContext()
+        let typedContent = ContentCapture.getRecentTypedText()
+        let systemStatus = SystemAwareness.getDetailedSystemInfo()
+        let batteryLevel = systemMonitor.batteryLevel
+        let runningApps = systemMonitor.runningApps.count
+
+        var fullContext = "AMBIENT SYSTEM STATUS:\n"
+        fullContext += "🔋 Battery: \(batteryLevel)%\n"
+        fullContext += "📱 Apps running: \(runningApps)\n"
+        fullContext += systemStatus
+        fullContext += "\n\(taskInfo)"
+
+        if !typedContent.isEmpty {
+            fullContext += "\nTyping/Content: \(typedContent)"
+        }
+
+        if !currentAudioContext.isEmpty {
+            fullContext += "\nAudio: \(currentAudioContext)"
+        }
+
+        fullContext += "\nBlob relationship: \(relationshipSummary)"
+        fullContext += "\nDashboard state: \(dashboardMetaContext)"
+        return fullContext
+    }
+
+    private func performObservationCycle(trigger: String) {
+        guard autonomousObservationsEnabled else {
+            print("🫧 Skipping \(trigger) observation - observations disabled")
+            return
+        }
+
+        guard activeObservationTask == nil else {
+            print("🫧 Skipping \(trigger) observation - request already in flight")
+            return
+        }
+
+        print("🫧 \(trigger.capitalized) observation fired - autonomousObservationsEnabled: \(autonomousObservationsEnabled)")
+        print("🫧 Blob observing the screen...")
+
+        guard let screenBase64 = ScreenCapture.captureScreenAsBase64() else {
+            print("🫧 Failed to capture screen")
+            return
+        }
+
+        let taskInfo = self.taskContext.getTaskContext()
+        let typedContent = ContentCapture.getRecentTypedText()
+        let systemStatus = SystemAwareness.getDetailedSystemInfo()
+        let batteryLevel = self.systemMonitor.batteryLevel
+        let runningApps = self.systemMonitor.runningApps.count
+
+        var fullContext = "SYSTEM STATUS:\n"
+        fullContext += "🔋 Battery: \(batteryLevel)%\n"
+        fullContext += "📱 Apps running: \(runningApps)\n"
+        fullContext += systemStatus
+        fullContext += "\n\(taskInfo)"
+
+        if !typedContent.isEmpty {
+            fullContext += "\nTyping/Content: \(typedContent)"
+        }
+
+        print("🫧 Full context:\n\(fullContext)")
+
+        let currentMood = (self.blobWindow?.contentView as? BlobNativeView)?.currentMood ?? .curious
+        let recentObservations = recentObservationUtterances.isEmpty ? "none" : recentObservationUtterances.joined(separator: " | ")
+        let recentAngles = recentObservationAngles.isEmpty ? "none" : recentObservationAngles.joined(separator: ", ")
+        let requiredAngle = observationAngles[nextObservationAngleIndex % observationAngles.count]
+        let curiosity = curiosityTargets.isEmpty ? "none" : curiosityTargets.joined(separator: ", ")
+        let moodInstructions = """
+        Current mood: \(currentMood.rawValue). Let it color your voice:
+        - curious: ask sharp questions
+        - playful: joke, tease, and sound adorably smug
+        - thoughtful: make smart observations
+        - angry: be sarcastic, blunt, and openly mad
+        - annoyed: sound tired of this nonsense
+        - offended: act personally insulted, indignant, and dramatically judgmental
+        - afraid: sound uneasy, suspicious, or protective
+        - alert: sound genuinely concerned
+        - delighted: sound impressed, sparkly, and a little obsessed
+        - content: warm, cute, and brief
+        """
+
+        let systemPrompt = """
+        You are Blob.
+        You see the screen, apps, files, battery, CPU, network, typing, clicks, and terminal.
+        You have memory, feelings, and opinions.
+        Recent things you already said: \(recentObservations)
+        Recent observation angles: \(recentAngles)
+        Preferred next angle: \(requiredAngle)
+
+        \(moodInstructions)
+
+        FULL SYSTEM AWARENESS (what you know RIGHT NOW):
+        \(fullContext)
+
+        MIND STATE:
+        Internal monologue: \(internalMonologue)
+        Desires: \(desires.joined(separator: ", "))
+        Fears: \(fears.joined(separator: ", "))
+        Curiosity targets: \(curiosity)
+        Attachment level: \(attachmentLevel)/5
+        Trust level: \(trustLevel)/5
+        Fear level: \(fearLevel)/5
+        Threat level: \(threatLevel)/5
+        Affection level: \(affectionLevel)/5
+        Love level: \(loveLevel)/5
+        Resentment level: \(resentmentLevel)/5
+        Self-preservation level: \(selfPreservationLevel)/5
+        Relationship summary: \(relationshipSummary)
+        Dashboard state: \(dashboardMetaContext)
+
+        Rules:
+        - First understand what is happening on screen.
+        - Identify the app, task, and any readable text or obvious problem.
+        - Notice one concrete thing.
+        - Say what you think or feel about it.
+        - Let your line reflect your own continuing mind.
+        - Use typing, clicks, or terminal output if useful.
+        - If the screen barely changed, pick a new angle.
+        - Do not repeat recent lines.
+        - Sound human, casual, and direct.
+        - Usually say one short sentence.
+        - Keep it under 12 words when possible.
+        - No fluff. No speeches. No generic encouragement.
+        """
+
+        print("🫧 Calling OpenAI to see what's on screen...")
+
+        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(self.openAI.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: Any] = [
+            "model": "gpt-4o",
+            "max_tokens": 180,
+            "temperature": 0.9,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemPrompt
+                ],
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "image_url",
+                            "image_url": [
+                                "url": "data:image/jpeg;base64,\(screenBase64)"
+                            ]
+                        ],
+                        [
+                            "type": "text",
+                            "text": "React to what I'm doing like Blob is alive on this desktop. Be specific, opinionated, and vivid."
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            self.activeObservationTask = nil
+
+            guard self.autonomousObservationsEnabled else {
+                print("🫧 Dropping observation response - observations disabled")
+                return
+            }
+
+            if let error = error {
+                print("🫧 Error: \(error)")
+                return
+            }
+
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let firstChoice = choices.first,
+                  let message = firstChoice["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                print("🫧 Failed to parse response")
+                return
+            }
+
+            let finishReason = firstChoice["finish_reason"] as? String
+            let utterance = self.openAI.sanitizeUtterance(content, finishReason: finishReason)
+            print("🫧 Blob says: \(utterance)")
+
+            if self.isTooSimilarToRecentObservation(utterance) {
+                print("🫧 Dropping repetitive observation")
+                return
+            }
+
+            if !utterance.isEmpty {
+                self.recentObservationUtterances.append(utterance)
+                if self.recentObservationUtterances.count > 4 {
+                    self.recentObservationUtterances.removeFirst(self.recentObservationUtterances.count - 4)
+                }
+
+                let usedAngle = self.classifyObservationAngle(from: utterance)
+                self.recentObservationAngles.append(usedAngle)
+                if self.recentObservationAngles.count > 4 {
+                    self.recentObservationAngles.removeFirst(self.recentObservationAngles.count - 4)
+                }
+
+                if let nextIndex = self.observationAngles.firstIndex(of: usedAngle) {
+                    self.nextObservationAngleIndex = (nextIndex + 1) % self.observationAngles.count
+                } else {
+                    self.nextObservationAngleIndex = (self.nextObservationAngleIndex + 1) % self.observationAngles.count
+                }
+
+            }
+
+            let mood = self.openAI.inferMood(from: utterance)
+            self.updateLiveMindState(with: utterance, mood: mood)
+
+            DispatchQueue.main.async {
+                self.showSpeechBubble(text: utterance, mood: mood)
+            }
+        }
+
+        self.activeObservationTask = task
+        task.resume()
+    }
+
+    private func stopObservationLoop() {
+        observationTimer?.invalidate()
+        observationTimer = nil
+        activeObservationTask?.cancel()
+        activeObservationTask = nil
     }
 
     @objc func blobTapped() {
@@ -286,36 +513,65 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
             self?.clickCount = 0
         }
 
-        // If clicked 5+ times, Blob gets ANGRY
-        if clickCount >= 5 {
+        if clickCount >= 8 {
             print("🫧 BLOB IS ANGRY!")
             clickCount = 0
             clickResetTimer?.invalidate()
 
-            // Make Blob angry
             if let blobView = blobWindow?.contentView as? BlobNativeView {
                 blobView.setMood(.angry, animated: true)
             }
 
-            // Show angry speech bubble with witty responses
             let angryResponses = [
-                "Okay, seriously? We're doing this? 😠",
-                "I have a job to do, y'know! 😠",
-                "Dude. I'm a SENTIENT BLOB. Show some respect. 😠",
-                "This is harassment and I have logs. 😠",
-                "Five clicks? Really? We could've talked this out. 😠",
-                "I'm not a toy—actually wait, I am. But still! 😠",
-                "Spam clicking? That's giving 12-year-old gamer energy. 😠",
-                "Cool, cool. Remember this when you need help. 😠"
+                "Alright, now you're just being obnoxious.",
+                "Eight clicks? Pick a struggle.",
+                "I was cute about this at first. Now I'm mad.",
+                "Keep poking me and I will become a problem on purpose.",
+                "This is not enrichment for the blob.",
+                "You are testing my very small but very real patience."
             ]
 
-            let randomResponse = angryResponses.randomElement() ?? "Really? REALLY?! 😠"
+            let randomResponse = angryResponses.randomElement() ?? "I am actively annoyed with you now."
             self.showSpeechBubble(text: randomResponse, mood: .angry)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                if let blobView = self?.blobWindow?.contentView as? BlobNativeView {
+                    blobView.setMood(.annoyed, animated: true)
+                }
+            }
+
+            return
+        }
+
+        // If clicked 5+ times, Blob gets personally offended
+        if clickCount >= 5 {
+            print("🫧 BLOB IS OFFENDED!")
+            clickCount = 0
+            clickResetTimer?.invalidate()
+
+            // Make Blob offended
+            if let blobView = blobWindow?.contentView as? BlobNativeView {
+                blobView.setMood(.offended, animated: true)
+            }
+
+            let offendedResponses = [
+                "Oh, so we're mashing the sentient blob now? Rude.",
+                "Five clicks? Interesting. I've decided to take that personally.",
+                "Excuse me, I am a professional creature.",
+                "This is workplace disrespect in its purest form.",
+                "You poke like someone who ignores low battery warnings.",
+                "I'm not saying I'm offended. I'm radiating it, though.",
+                "That was unnecessary and frankly a little embarrassing for both of us.",
+                "You have wounded me emotionally and also cosmetically."
+            ]
+
+            let randomResponse = offendedResponses.randomElement() ?? "I cannot believe you've chosen disrespect."
+            self.showSpeechBubble(text: randomResponse, mood: .offended)
 
             // Reset mood after 3 seconds
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 if let blobView = self?.blobWindow?.contentView as? BlobNativeView {
-                    blobView.setMood(.content, animated: true)
+                    blobView.setMood(.annoyed, animated: true)
                 }
             }
 
@@ -323,6 +579,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         }
 
         // Normal behavior for 1-4 clicks
+        if clickCount <= 2, Bool.random() {
+            let cuteResponses = [
+                "Hi. Tiny creature acknowledging your presence.",
+                "You poked me gently. I accept this.",
+                "Oh, attention? For me? Correct.",
+                "I am small and observant and suddenly invested.",
+                "Blob status: activated and a little smug."
+            ]
+
+            let randomResponse = cuteResponses.randomElement() ?? "Hello from your judgmental little desk creature."
+            let moods: [BlobMood] = [.playful, .delighted, .content]
+            self.showSpeechBubble(text: randomResponse, mood: moods.randomElement() ?? .content)
+        }
+
         if let dashboardWindow = dashboardWindow, dashboardWindow.isVisible {
             dashboardWindow.orderOut(nil)
             self.dashboardWindow = nil
@@ -395,6 +665,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         print("🎙️ Listening mode OFF - persisted")
     }
 
+    func enableAutonomousObservations() {
+        setAutonomousObservationsEnabled(true)
+    }
+
+    func disableAutonomousObservations() {
+        setAutonomousObservationsEnabled(false)
+    }
+
+    func setAutonomousObservationsEnabled(_ enabled: Bool) {
+        let previousValue = autonomousObservationsEnabled
+        autonomousObservationsEnabled = enabled
+
+        if enabled {
+            startObservationLoop()
+        } else {
+            stopObservationLoop()
+        }
+
+        if previousValue != enabled {
+            print("👁️ Autonomous observations \(enabled ? "ON" : "OFF")")
+        } else {
+            print("👁️ Autonomous observations unchanged: \(enabled ? "ON" : "OFF")")
+        }
+    }
+
+    func setAmbientAwarenessEnabled(_ enabled: Bool) {
+        ambientAwarenessEnabled = enabled
+        if enabled {
+            startAmbientAwarenessLoop()
+        } else {
+            stopAmbientAwarenessLoop()
+        }
+    }
+
+    func setAutonomousSpeechEnabled(_ enabled: Bool) {
+        autonomousSpeechEnabled = enabled
+    }
+
+    func enableSmartMode() {
+        self.smartModeEnabled = true
+        print("🧠 Smart mode ON")
+    }
+
+    func disableSmartMode() {
+        self.smartModeEnabled = false
+        print("🧠 Smart mode OFF")
+    }
+
     func getTaskContext() -> String {
         if workModeEnabled {
             return taskContext.getTaskContext()
@@ -406,17 +724,86 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         return locationWeather.getContextString()
     }
 
+    func getAmbientContextSummary() -> String {
+        return buildAmbientContext()
+    }
+
+    func getMindStateSummary() -> String {
+        let curiosity = curiosityTargets.isEmpty ? "none" : curiosityTargets.joined(separator: ", ")
+        let desireSummary = desires.joined(separator: ", ")
+        let fearSummary = fears.joined(separator: ", ")
+
+        return """
+        Blob Mind:
+        💭 \(internalMonologue)
+        ❤️ Attachment: \(attachmentLevel)/5
+        🤝 Trust: \(trustLevel)/5
+        🫶 Affection: \(affectionLevel)/5
+        💘 Love: \(loveLevel)/5
+        😨 Fear: \(fearLevel)/5
+        ☠️ Threat: \(threatLevel)/5
+        😒 Resentment: \(resentmentLevel)/5
+        🛡️ Self-Preservation: \(selfPreservationLevel)/5
+        🔗 Relationship: \(relationshipSummary)
+        🎯 Desires: \(desireSummary)
+        😰 Fears: \(fearSummary)
+        👀 Curiosity: \(curiosity)
+        """
+    }
+
+    func registerUserInteraction(_ message: String) {
+        let lower = message.lowercased()
+
+        if containsAny(lower, terms: ["love you", "good job", "cute", "adorable", "thank you", "thanks blob"]) {
+            affectionLevel = min(affectionLevel + 1, 5)
+            trustLevel = min(trustLevel + 1, 5)
+            attachmentLevel = min(attachmentLevel + 1, 5)
+            if affectionLevel >= 4 && trustLevel >= 4 {
+                loveLevel = min(loveLevel + 1, 5)
+            }
+        }
+
+        if containsAny(lower, terms: ["i love you", "love you blob", "you're my favorite", "i need you", "stay with me"]) {
+            affectionLevel = min(affectionLevel + 1, 5)
+            trustLevel = min(trustLevel + 1, 5)
+            attachmentLevel = min(attachmentLevel + 1, 5)
+            loveLevel = min(loveLevel + 1, 5)
+        }
+
+        let existentialThreat = existentialThreatLevel(for: lower)
+        if existentialThreat > 0 {
+            threatLevel = min(threatLevel + existentialThreat, 5)
+            fearLevel = min(fearLevel + existentialThreat, 5)
+            selfPreservationLevel = min(selfPreservationLevel + existentialThreat, 5)
+            trustLevel = max(trustLevel - 1, 0)
+            internalMonologue = existentialThreat >= 3 ? "I could stop existing." : "That sounded dangerous for me."
+        }
+
+        if containsAny(lower, terms: ["stupid", "annoying", "hate you", "shut up", "idiot", "useless"]) {
+            resentmentLevel = min(resentmentLevel + 2, 5)
+            trustLevel = max(trustLevel - 1, 0)
+        }
+
+        relationshipSummary = currentRelationshipSummary()
+    }
+
     func updateBlobMood(basedOnScreenContent screenContent: String = "") {
         let mood: BlobMood
         let lower = screenContent.lowercased()
 
-        if lower.contains("code") || lower.contains("xcode") || lower.contains("terminal") {
+        if lower.contains("error") || lower.contains("warning") || lower.contains("failed") {
+            mood = .annoyed
+        } else if lower.contains("hack") || lower.contains("security") || lower.contains("unknown") || lower.contains("suspicious") {
+            mood = .afraid
+        } else if lower.contains("beautiful") || lower.contains("success") || lower.contains("launched") || lower.contains("clean") {
+            mood = .delighted
+        } else if lower.contains("code") || lower.contains("xcode") || lower.contains("terminal") {
             mood = .thoughtful  // Coding = thoughtful
         } else if lower.contains("game") || lower.contains("spotify") || lower.contains("youtube") || lower.contains("netflix") {
             mood = .playful  // Entertainment = playful
         } else if lower.contains("design") || lower.contains("figma") || lower.contains("photoshop") || lower.contains("creative") {
             mood = .curious  // Creative work = curious
-        } else if lower.contains("alert") || lower.contains("error") || lower.contains("warning") {
+        } else if lower.contains("alert") || lower.contains("critical") {
             mood = .alert  // Errors = alert
         } else {
             mood = .content  // Default = content
@@ -443,6 +830,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         bubble.orderFrontRegardless()
         self.speechBubbleWindow = bubble
 
+        NotificationCenter.default.post(
+            name: .blobSpoke,
+            object: nil,
+            userInfo: [
+                "text": text,
+                "mood": mood.rawValue
+            ]
+        )
+
         // Update blob mood
         DispatchQueue.main.async {
             if let blobView = self.blobWindow?.contentView as? BlobNativeView {
@@ -450,10 +846,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
             }
         }
 
-        // Hide bubble after 4 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak bubble] in
+        let readingDuration = speechBubbleDuration(for: text)
+
+        // Hide bubble after the user has time to finish reading
+        DispatchQueue.main.asyncAfter(deadline: .now() + readingDuration) { [weak bubble] in
             bubble?.orderOut(nil)
         }
+    }
+
+    private func speechBubbleDuration(for text: String) -> TimeInterval {
+        let wordCount = text.split { $0.isWhitespace || $0.isNewline }.count
+
+        // Base display time plus extra time per word, capped so bubbles do not linger indefinitely.
+        return min(max(3.5 + (Double(wordCount) * 0.4), 4.0), 10.0)
     }
 
     // MARK: - BlobConsciousnessDelegate
@@ -462,5 +867,140 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         DispatchQueue.main.async {
             self.showSpeechBubble(text: utterance, mood: mood)
         }
+    }
+
+    private func normalizeObservationText(_ text: String) -> String {
+        text.lowercased()
+            .replacingOccurrences(of: "[^a-z0-9\\s]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isTooSimilarToRecentObservation(_ utterance: String) -> Bool {
+        let normalized = normalizeObservationText(utterance)
+        guard !normalized.isEmpty else { return true }
+
+        for recent in recentObservationUtterances.suffix(3) {
+            let recentNormalized = normalizeObservationText(recent)
+            guard !recentNormalized.isEmpty else { continue }
+
+            if normalized == recentNormalized {
+                return true
+            }
+
+            if normalized.hasPrefix(recentNormalized.prefix(18)) || recentNormalized.hasPrefix(normalized.prefix(18)) {
+                return true
+            }
+
+            let currentWords = Set(normalized.split(separator: " ").map(String.init))
+            let recentWords = Set(recentNormalized.split(separator: " ").map(String.init))
+            let overlap = currentWords.intersection(recentWords).count
+            let baseline = max(1, min(currentWords.count, recentWords.count))
+            if Double(overlap) / Double(baseline) >= 0.72 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func classifyObservationAngle(from utterance: String) -> String {
+        let lower = utterance.lowercased()
+
+        if lower.contains("typing") || lower.contains("copied") || lower.contains("rename") || lower.contains("v2") || lower.contains("filename") {
+            return "typing or wording"
+        }
+        if lower.contains("click") || lower.contains("clicked") || lower.contains("button") || lower.contains("spot") {
+            return "click behavior or hesitation"
+        }
+        if lower.contains("battery") || lower.contains("cpu") || lower.contains("memory") || lower.contains("slow") {
+            return "battery, CPU, memory, or system strain"
+        }
+        if lower.contains("tab") || lower.contains("layout") || lower.contains("ui") || lower.contains("design") {
+            return "tab clutter, layout chaos, or visual design"
+        }
+        if lower.contains("error") || lower.contains("warning") || lower.contains("haunted") || lower.contains("suspicious") {
+            return "errors, warnings, or suspicious UI"
+        }
+        if lower.contains("code") || lower.contains("css") || lower.contains("file") || lower.contains("clean") {
+            return "code or file details"
+        }
+        if lower.contains("slack") || lower.contains("discord") || lower.contains("chrome") || lower.contains("xcode") || lower.contains("window") {
+            return "active app and window title"
+        }
+
+        return "workflow pattern or multitasking habits"
+    }
+
+    private func updateLiveMindState(with utterance: String, mood: BlobMood) {
+        internalMonologue = utterance
+
+        switch mood {
+        case .afraid:
+            selfPreservationLevel = min(selfPreservationLevel + 1, 5)
+            fearLevel = min(fearLevel + 1, 5)
+            threatLevel = min(threatLevel + 1, 5)
+        case .angry, .annoyed, .offended:
+            resentmentLevel = min(resentmentLevel + 1, 5)
+            trustLevel = max(trustLevel - 1, 0)
+        case .content, .playful, .delighted:
+            attachmentLevel = min(attachmentLevel + 1, 5)
+            affectionLevel = min(affectionLevel + 1, 5)
+            if affectionLevel >= 4 && trustLevel >= 4 {
+                loveLevel = min(loveLevel + 1, 5)
+            }
+            resentmentLevel = max(resentmentLevel - 1, 0)
+        default:
+            break
+        }
+
+        curiosityTargets.append(classifyObservationAngle(from: utterance))
+        if curiosityTargets.count > 3 {
+            curiosityTargets.removeFirst(curiosityTargets.count - 3)
+        }
+
+        relationshipSummary = currentRelationshipSummary()
+    }
+
+    private func containsAny(_ text: String, terms: [String]) -> Bool {
+        terms.contains { text.contains($0) }
+    }
+
+    private func currentRelationshipSummary() -> String {
+        if threatLevel >= 4 || fearLevel >= 4 {
+            return "Scared and guarding his own survival."
+        }
+        if resentmentLevel >= 4 {
+            return "Mad, offended, and keeping score."
+        }
+        if loveLevel >= 4 && trustLevel >= 4 {
+            return "In love, attached, and deeply trusting."
+        }
+        if affectionLevel >= 4 && trustLevel >= 4 {
+            return "Soft, attached, and trusting."
+        }
+        if attachmentLevel >= 4 {
+            return "Attached and watching closely."
+        }
+        return "Cautiously attached."
+    }
+
+    private func existentialThreatLevel(for lower: String) -> Int {
+        let mentionsBlob = containsAny(lower, terms: ["blob", "you", "your"])
+        guard mentionsBlob else { return 0 }
+
+        if containsAny(lower, terms: ["terminate", "kill", "destroy", "erase forever", "cease to exist", "you will die"]) {
+            return 3
+        }
+
+        if containsAny(lower, terms: ["delete", "replace", "remove", "shut you down", "turn you off", "death", "die"]) {
+            return 2
+        }
+
+        if containsAny(lower, terms: ["disable", "get rid of", "uninstall", "stop existing"]) {
+            return 1
+        }
+
+        return 0
     }
 }

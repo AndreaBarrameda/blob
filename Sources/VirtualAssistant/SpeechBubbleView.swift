@@ -4,10 +4,16 @@ class SpeechBubbleWindow: NSWindow {
     init(text: String, originPoint: NSPoint) {
         let bubbleView = SpeechBubbleView(text: text)
 
-        // Calculate size based on text
-        let textSize = (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)])
-        let width = min(max(textSize.width + 30, 80), 200)
-        let height = textSize.height + 30
+        // Calculate size based on text with multi-line support
+        let font = NSFont.systemFont(ofSize: 12)
+        let maxWidth: CGFloat = 300
+        let boundingRect = (text as NSString).boundingRect(
+            with: CGSize(width: maxWidth - 30, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+        let width = min(max(ceil(boundingRect.width) + 30, 80), maxWidth)
+        let height = ceil(boundingRect.height) + 30
 
         // Position bubble above blob with good spacing
         // Blob is 120x120, so place bubble well above it

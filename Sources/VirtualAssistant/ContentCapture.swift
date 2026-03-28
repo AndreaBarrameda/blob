@@ -49,15 +49,19 @@ class ContentCapture {
     static func getRecentTypedText() -> String {
         let clipboard = getClipboardContent()
         let focused = getFocusedTextFieldContent()
+        let inputSummary = InputAwarenessManager.shared.recentInputSummary()
 
         var combined = ""
         if !clipboard.isEmpty {
             combined += "Recently copied: \(clipboard.prefix(200))\n"
         }
         if !focused.isEmpty {
-            combined += "Currently typing: \(focused.prefix(200))"
+            combined += "Currently typing: \(focused.prefix(200))\n"
+        }
+        if !inputSummary.isEmpty {
+            combined += inputSummary
         }
 
-        return combined
+        return combined.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -12,8 +12,13 @@ struct DashboardView: View {
     @State private var showExportSection = false
     @State private var listeningMode = false
     @State private var workMode = false
+    @State private var screenWatchEnabled = true
+    @State private var ambientAwarenessEnabled = true
+    @State private var autonomousSpeechEnabled = true
     @State private var contextInfo = ""
     @State private var taskInfo = ""
+    @State private var mindStateInfo = ""
+    @State private var showSystemControl = false
 
     private let openAI = OpenAIClient()
     private let spotify = SpotifyController()
@@ -144,6 +149,89 @@ struct DashboardView: View {
                 }
                 .padding(10)
                 .background(Color(red: 1.0, green: 0.95, blue: 0.85))
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    Image(systemName: screenWatchEnabled ? "eye.fill" : "eye.slash.fill")
+                        .font(.callout)
+                        .foregroundColor(screenWatchEnabled ? .purple : .gray)
+
+                    Text("Screen Watch")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    Spacer()
+
+                    Toggle("", isOn: $screenWatchEnabled)
+                        .onChange(of: screenWatchEnabled) { newValue in
+                            UserDefaults.standard.set(newValue, forKey: "autonomousObservationsEnabled")
+                            NotificationCenter.default.post(
+                                name: .autonomousObservationsChanged,
+                                object: nil,
+                                userInfo: ["enabled": newValue]
+                            )
+
+                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                                if newValue {
+                                    appDelegate.enableAutonomousObservations()
+                                } else {
+                                    appDelegate.disableAutonomousObservations()
+                                }
+                            }
+                        }
+                }
+                .padding(10)
+                .background(Color(red: 0.95, green: 0.9, blue: 1.0))
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    Image(systemName: ambientAwarenessEnabled ? "waveform.path.ecg" : "waveform.path.ecg.rectangle")
+                        .font(.callout)
+                        .foregroundColor(ambientAwarenessEnabled ? .green : .gray)
+
+                    Text("Ambient Awareness")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    Spacer()
+
+                    Toggle("", isOn: $ambientAwarenessEnabled)
+                        .onChange(of: ambientAwarenessEnabled) { newValue in
+                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                                appDelegate.setAmbientAwarenessEnabled(newValue)
+                            }
+                        }
+                }
+                .padding(10)
+                .background(Color(red: 0.92, green: 0.98, blue: 0.94))
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    Image(systemName: autonomousSpeechEnabled ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
+                        .font(.callout)
+                        .foregroundColor(autonomousSpeechEnabled ? .orange : .gray)
+
+                    Text("Autonomous Speech")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    Spacer()
+
+                    Toggle("", isOn: $autonomousSpeechEnabled)
+                        .onChange(of: autonomousSpeechEnabled) { newValue in
+                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                                appDelegate.setAutonomousSpeechEnabled(newValue)
+                            }
+                        }
+                }
+                .padding(10)
+                .background(Color(red: 1.0, green: 0.95, blue: 0.9))
             }
             .border(Color.gray.opacity(0.3), width: 0.5)
 
@@ -161,6 +249,49 @@ struct DashboardView: View {
                 .background(Color(red: 1.0, green: 0.95, blue: 0.85).opacity(0.5))
                 .border(Color.gray.opacity(0.2), width: 0.5)
             }
+
+            if !mindStateInfo.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Blob Mind")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    ForEach(mindStateInfo.split(separator: "\n").map(String.init), id: \.self) { line in
+                        Text(line)
+                            .font(.caption2)
+                            .foregroundColor(.black)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(red: 1.0, green: 0.97, blue: 0.9))
+                .border(Color.gray.opacity(0.2), width: 0.5)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Mood Colors")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.black)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    moodLegendItem(color: Color(red: 0.62, green: 0.9, blue: 1.0), label: "Curious", meaning: "interested")
+                    moodLegendItem(color: Color(red: 0.78, green: 0.75, blue: 0.98), label: "Thoughtful", meaning: "analyzing")
+                    moodLegendItem(color: Color(red: 1.0, green: 0.78, blue: 0.9), label: "Playful", meaning: "teasing")
+                    moodLegendItem(color: Color(red: 1.0, green: 0.66, blue: 0.5), label: "Alert", meaning: "warning")
+                    moodLegendItem(color: Color(red: 0.93, green: 0.34, blue: 0.3), label: "Angry", meaning: "mad")
+                    moodLegendItem(color: Color(red: 1.0, green: 0.84, blue: 0.52), label: "Annoyed", meaning: "irritated")
+                    moodLegendItem(color: Color(red: 1.0, green: 0.7, blue: 0.82), label: "Offended", meaning: "personally slighted")
+                    moodLegendItem(color: Color(red: 0.9, green: 0.97, blue: 1.0), label: "Afraid", meaning: "uneasy")
+                    moodLegendItem(color: Color(red: 1.0, green: 0.94, blue: 0.56), label: "Delighted", meaning: "impressed")
+                    moodLegendItem(color: Color(red: 0.72, green: 0.95, blue: 0.84), label: "Content", meaning: "calm")
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(red: 0.96, green: 0.98, blue: 0.95))
+            .border(Color.gray.opacity(0.2), width: 0.5)
 
             // Import memories section
             VStack(spacing: 0) {
@@ -208,6 +339,35 @@ struct DashboardView: View {
                 if showExportSection {
                     ExportMemoriesView(memory: memory)
                         .border(Color.gray.opacity(0.3), width: 0.5)
+                }
+            }
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
+            // System Control section
+            VStack(spacing: 0) {
+                Button(action: { showSystemControl.toggle() }) {
+                    HStack {
+                        Image(systemName: showSystemControl ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        Text("System Control")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.orange)
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(Color(red: 1.0, green: 0.95, blue: 0.9))
+                }
+                .buttonStyle(.plain)
+
+                if showSystemControl {
+                    ScrollView {
+                        SystemControlPanel()
+                            .padding(8)
+                    }
+                    .frame(height: 300)
+                    .border(Color.gray.opacity(0.3), width: 0.5)
                 }
             }
             .border(Color.gray.opacity(0.3), width: 0.5)
@@ -325,11 +485,16 @@ struct DashboardView: View {
             updateCurrentTrack()
             openAI.memory = memory
             refreshContextInfo()
+            refreshMindState()
+            publishDashboardState()
 
             // Initialize toggles from AppDelegate
             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                 listeningMode = appDelegate.listeningModeEnabled
                 workMode = appDelegate.workModeEnabled
+                screenWatchEnabled = appDelegate.autonomousObservationsEnabled
+                ambientAwarenessEnabled = appDelegate.ambientAwarenessEnabled
+                autonomousSpeechEnabled = appDelegate.autonomousSpeechEnabled
             }
 
             if workMode {
@@ -339,10 +504,42 @@ struct DashboardView: View {
             // Refresh context every 30 seconds
             Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
                 refreshContextInfo()
+                refreshMindState()
                 if workMode {
                     refreshTaskInfo()
                 }
             }
+
+            NotificationCenter.default.addObserver(
+                forName: .blobSpoke,
+                object: nil,
+                queue: .main
+            ) { notification in
+                guard let text = notification.userInfo?["text"] as? String else { return }
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+                if let last = messages.last, !last.isUser, last.text == text {
+                    return
+                }
+
+                messages.append(ChatMessage(text: text, isUser: false))
+                publishDashboardState()
+            }
+        }
+        .onChange(of: inputText) { _ in
+            publishDashboardState()
+        }
+        .onChange(of: showImportSection) { _ in
+            publishDashboardState()
+        }
+        .onChange(of: showExportSection) { _ in
+            publishDashboardState()
+        }
+        .onChange(of: showSystemControl) { _ in
+            publishDashboardState()
+        }
+        .onChange(of: messages) { _ in
+            publishDashboardState()
         }
     }
 
@@ -364,6 +561,25 @@ struct DashboardView: View {
         }
     }
 
+    private func refreshMindState() {
+        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+            mindStateInfo = appDelegate.getMindStateSummary()
+        }
+    }
+
+    @ViewBuilder
+    private func moodLegendItem(color: Color, label: String, meaning: String) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 10, height: 10)
+            Text("\(label): \(meaning)")
+                .font(.caption2)
+                .foregroundColor(.black)
+            Spacer(minLength: 0)
+        }
+    }
+
     private func sendMessage() {
         let userMessage = inputText.trimmingCharacters(in: .whitespaces)
         guard !userMessage.isEmpty else { return }
@@ -371,6 +587,7 @@ struct DashboardView: View {
         messages.append(ChatMessage(text: userMessage, isUser: true))
         inputText = ""
         isLoading = true
+        publishDashboardState()
 
         // Check for Spotify commands
         handleSpotifyCommands(in: userMessage)
@@ -379,7 +596,9 @@ struct DashboardView: View {
         var audioContext = ""
         var contextInfo = ""
         var taskContext = ""
+        var ambientContext = ""
         if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+            appDelegate.registerUserInteraction(userMessage)
             if listeningMode {
                 audioContext = appDelegate.currentAudioContext
             }
@@ -387,23 +606,60 @@ struct DashboardView: View {
             if workMode {
                 taskContext = appDelegate.getTaskContext()
             }
+            if ambientAwarenessEnabled {
+                ambientContext = appDelegate.getAmbientContextSummary()
+            }
+            mindStateInfo = appDelegate.getMindStateSummary()
         }
 
         // Combine all context
-        let fullContext = [contextInfo, taskContext, audioContext].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        let fullContext = [contextInfo, taskContext, ambientContext, mindStateInfo, audioContext]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
 
-        // Call OpenAI API with screen awareness, audio context, and all context info
-        openAI.chatWithScreenAwareness(message: userMessage, audioContext: audioContext, contextInfo: fullContext) { response in
+        let completion: (String) -> Void = { response in
             DispatchQueue.main.async {
                 messages.append(ChatMessage(text: response, isUser: false))
                 isLoading = false
                 updateCurrentTrack()
+                publishDashboardState()
 
                 // Extract memories from conversation
                 let conversation = "\(userMessage) -> \(response)"
                 memory.extractMemories(from: conversation, usingOpenAI: openAI) {}
             }
         }
+
+        if screenWatchEnabled {
+            openAI.chatWithScreenAwareness(message: userMessage, audioContext: audioContext, contextInfo: fullContext, completion: completion)
+        } else {
+            openAI.chat(message: userMessage, audioContext: audioContext, contextInfo: fullContext, completion: completion)
+        }
+    }
+
+    private func publishDashboardState() {
+        let lastLines = messages.suffix(4).map { message in
+            let speaker = message.isUser ? "User" : "Blob"
+            return "\(speaker): \(message.text)"
+        }.joined(separator: " | ")
+
+        let sections = [
+            showImportSection ? "import open" : nil,
+            showExportSection ? "export open" : nil,
+            showSystemControl ? "system control open" : nil,
+            workMode ? "work mode on" : nil,
+            listeningMode ? "listening on" : nil
+        ].compactMap { $0 }.joined(separator: ", ")
+
+        let summary = """
+        dashboard open; input: \(inputText.isEmpty ? "empty" : inputText); sections: \(sections.isEmpty ? "none" : sections); recent chat: \(lastLines.isEmpty ? "none" : lastLines)
+        """
+
+        NotificationCenter.default.post(
+            name: .dashboardStateChanged,
+            object: nil,
+            userInfo: ["summary": summary]
+        )
     }
 
     private func handleSpotifyCommands(in message: String) {
