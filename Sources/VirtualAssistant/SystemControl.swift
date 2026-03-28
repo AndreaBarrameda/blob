@@ -176,4 +176,75 @@ class SystemControl {
         ]
         return codes[name.lowercased()] ?? 0
     }
+
+    // MARK: - Calendar Integration
+    static func addCalendarEvent(title: String, startDate: Date = Date()) -> Bool {
+        print("📅 Adding calendar event: '\(title)' at \(startDate)")
+
+        // Open Calendar first
+        _ = openCalendar()
+
+        // Wait for Calendar to open, then send AppleScript via osascript (more reliable than NSAppleScript)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "MM/dd/yyyy"
+            let dateStr = dateFormatter.string(from: startDate)
+
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "h:mm a"
+            let timeStr = timeFormatter.string(from: startDate)
+
+            // Calculate end date (1 hour after start)
+            let endDate = startDate.addingTimeInterval(3600)
+            let endTimeFormatter = DateFormatter()
+            endTimeFormatter.dateFormat = "h:mm a"
+            let endTimeStr = endTimeFormatter.string(from: endDate)
+
+            // AppleScript to create event in Calendar (requires both start and end date)
+            let script = """
+            tell application "Calendar"
+                tell calendar 1
+                    make new event with properties {summary:"\(title)", start date:(date "\(dateStr) \(timeStr)"), end date:(date "\(dateStr) \(endTimeStr)")}
+                end tell
+            end tell
+            """
+
+            // Use osascript via Process (more reliable for background apps)
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            task.arguments = ["-e", script]
+
+            let pipe = Pipe()
+            task.standardError = pipe
+
+            do {
+                try task.run()
+                task.waitUntilExit()
+
+                if task.terminationStatus == 0 {
+                    print("✅ Calendar event '\(title)' added successfully")
+                } else {
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    if let errorMsg = String(data: data, encoding: .utf8), !errorMsg.isEmpty {
+                        print("⚠️ Calendar error: \(errorMsg)")
+                    } else {
+                        print("⚠️ Calendar event may have been created (status: \(task.terminationStatus))")
+                    }
+                }
+            } catch {
+                print("❌ Calendar Error: \(error)")
+            }
+        }
+
+        return true
+    }
+
+    static func openCalendar() -> Bool {
+        // Open Calendar app - no permissions needed
+        if launchApp("com.apple.iCal") {
+            print("✅ Calendar opened")
+            return true
+        }
+        return launchApp("Calendar")
+    }
 }
