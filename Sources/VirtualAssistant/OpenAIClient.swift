@@ -118,8 +118,8 @@ class OpenAIClient {
         )
 
         let payload: [String: Any] = [
-            "model": "gpt-4o",
-            "max_tokens": 200,
+            "model": "gpt-5.4-mini",
+            "max_completion_tokens": 8000,
             "temperature": 0.9,
             "messages": [
                 ["role": "system", "content": systemPrompt],
@@ -159,13 +159,13 @@ class OpenAIClient {
         )
 
         let payload: [String: Any] = [
-            "model": "gpt-4o",
+            "model": "gpt-5.4-mini",
             "messages": [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": message]
             ],
             "temperature": 0.95,
-            "max_tokens": 200
+            "max_completion_tokens": 8000
         ]
 
         makeChatRequest(payload: payload) { [weak self] result in
@@ -197,13 +197,13 @@ class OpenAIClient {
         """
 
         let payload: [String: Any] = [
-            "model": "gpt-4o",
+            "model": "gpt-5.4-mini",
             "messages": [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": "System context:\n\(systemContext)"]
             ],
             "temperature": 0.9,
-            "max_tokens": 80
+            "max_completion_tokens": 800
         ]
 
         makeChatRequest(payload: payload) { [weak self] result in
@@ -222,8 +222,8 @@ class OpenAIClient {
     @discardableResult
     func observationRequest(screenBase64: String, systemPrompt: String, completion: @escaping (String, BlobMood) -> Void) -> URLSessionDataTask {
         let payload: [String: Any] = [
-            "model": "gpt-4o",
-            "max_tokens": 120,
+            "model": "gpt-5.4-mini",
+            "max_completion_tokens": 800,
             "temperature": 0.9,
             "messages": [
                 ["role": "system", "content": systemPrompt],

@@ -15,6 +15,7 @@ struct DashboardView: View {
     @State private var screenWatchEnabled = true
     @State private var ambientAwarenessEnabled = true
     @State private var autonomousSpeechEnabled = true
+    @State private var voiceEnabled = true
     @State private var contextInfo = ""
     @State private var taskInfo = ""
     @State private var mindStateInfo = ""
@@ -22,16 +23,16 @@ struct DashboardView: View {
     @State private var chatTimeoutTimer: Timer?
 
     private var openAI: OpenAIClient {
-        (NSApplication.shared.delegate as? AppDelegate)?.openAI ?? OpenAIClient()
+        AppDelegate.shared?.openAI ?? OpenAIClient()
     }
     private var spotify: SpotifyController {
-        (NSApplication.shared.delegate as? AppDelegate)?.spotify ?? SpotifyController()
+        AppDelegate.shared?.spotify ?? SpotifyController()
     }
     private var memory: BlobMemory {
-        (NSApplication.shared.delegate as? AppDelegate)?.memory ?? BlobMemory()
+        AppDelegate.shared?.memory ?? BlobMemory()
     }
     private var conversationLog: ConversationLog {
-        (NSApplication.shared.delegate as? AppDelegate)?.conversationLog ?? ConversationLog()
+        AppDelegate.shared?.conversationLog ?? ConversationLog()
     }
 
     var body: some View {
@@ -121,7 +122,8 @@ struct DashboardView: View {
                     Toggle(isOn: $listeningMode) { EmptyView() }
                         .labelsHidden()
                         .onChange(of: listeningMode) { newValue in
-                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            print("🎙️ Toggle changed to: \(newValue)")
+                            if let appDelegate = AppDelegate.shared {
                                 if newValue {
                                     appDelegate.enableListeningMode()
                                 } else {
@@ -150,7 +152,7 @@ struct DashboardView: View {
                     Toggle(isOn: $workMode) { EmptyView() }
                         .labelsHidden()
                         .onChange(of: workMode) { newValue in
-                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            if let appDelegate = AppDelegate.shared {
                                 if newValue {
                                     appDelegate.enableWorkMode()
                                     refreshTaskInfo()
@@ -188,7 +190,7 @@ struct DashboardView: View {
                                 userInfo: ["enabled": newValue]
                             )
 
-                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            if let appDelegate = AppDelegate.shared {
                                 if newValue {
                                     appDelegate.enableAutonomousObservations()
                                 } else {
@@ -217,7 +219,7 @@ struct DashboardView: View {
                     Toggle(isOn: $ambientAwarenessEnabled) { EmptyView() }
                         .labelsHidden()
                         .onChange(of: ambientAwarenessEnabled) { newValue in
-                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            if let appDelegate = AppDelegate.shared {
                                 appDelegate.setAmbientAwarenessEnabled(newValue)
                             }
                         }
@@ -242,13 +244,38 @@ struct DashboardView: View {
                     Toggle(isOn: $autonomousSpeechEnabled) { EmptyView() }
                         .labelsHidden()
                         .onChange(of: autonomousSpeechEnabled) { newValue in
-                            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            if let appDelegate = AppDelegate.shared {
                                 appDelegate.setAutonomousSpeechEnabled(newValue)
                             }
                         }
                 }
                 .padding(10)
                 .background(Color(red: 1.0, green: 0.95, blue: 0.9))
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    Image(systemName: voiceEnabled ? "speaker.wave.3.fill" : "speaker.slash.fill")
+                        .font(.callout)
+                        .foregroundColor(voiceEnabled ? .pink : .gray)
+
+                    Text("Voice (ElevenLabs)")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    Spacer()
+
+                    Toggle(isOn: $voiceEnabled) { EmptyView() }
+                        .labelsHidden()
+                        .onChange(of: voiceEnabled) { newValue in
+                            if let appDelegate = AppDelegate.shared {
+                                appDelegate.elevenLabs.isEnabled = newValue
+                            }
+                        }
+                }
+                .padding(10)
+                .background(Color(red: 1.0, green: 0.92, blue: 0.95))
             }
             .border(Color.gray.opacity(0.3), width: 0.5)
 
@@ -504,18 +531,21 @@ struct DashboardView: View {
         }
         .frame(minWidth: 420, minHeight: 600)
         .onAppear {
+            print("📋 Dashboard appeared")
             updateCurrentTrack()
             refreshContextInfo()
             refreshMindState()
             publishDashboardState()
 
             // Initialize toggles from AppDelegate
-            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+            if let appDelegate = AppDelegate.shared {
+                print("📋 AppDelegate connected — syncing toggles")
                 listeningMode = appDelegate.listeningModeEnabled
                 workMode = appDelegate.workModeEnabled
                 screenWatchEnabled = appDelegate.autonomousObservationsEnabled
                 ambientAwarenessEnabled = appDelegate.ambientAwarenessEnabled
                 autonomousSpeechEnabled = appDelegate.autonomousSpeechEnabled
+                voiceEnabled = appDelegate.elevenLabs.isEnabled
             }
 
             if workMode {
@@ -571,19 +601,19 @@ struct DashboardView: View {
     }
 
     private func refreshContextInfo() {
-        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+        if let appDelegate = AppDelegate.shared {
             contextInfo = appDelegate.getContextInfo()
         }
     }
 
     private func refreshTaskInfo() {
-        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+        if let appDelegate = AppDelegate.shared {
             taskInfo = appDelegate.getTaskContext()
         }
     }
 
     private func refreshMindState() {
-        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+        if let appDelegate = AppDelegate.shared {
             mindStateInfo = appDelegate.getMindStateSummary()
         }
     }
@@ -617,7 +647,7 @@ struct DashboardView: View {
         var contextInfo = ""
         var taskContext = ""
         var ambientContext = ""
-        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+        if let appDelegate = AppDelegate.shared {
             appDelegate.registerUserInteraction(userMessage)
             if listeningMode {
                 audioContext = appDelegate.currentAudioContext
@@ -653,7 +683,7 @@ struct DashboardView: View {
                 publishDashboardState()
 
                 // Update blob mood from LLM response
-                if let blobView = (NSApplication.shared.delegate as? AppDelegate)?.blobWindow?.contentView as? BlobNativeView {
+                if let blobView = AppDelegate.shared?.blobWindow?.contentView as? BlobNativeView {
                     blobView.setMood(mood, animated: true)
                 }
 

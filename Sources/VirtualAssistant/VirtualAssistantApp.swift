@@ -18,7 +18,9 @@ struct VirtualAssistantApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVoiceAgentDelegate {
+    static var shared: AppDelegate!
+
     private let observationAngles = [
         "typing or wording",
         "click behavior or hesitation",
@@ -38,7 +40,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let spotify = SpotifyController()
     let memory = BlobMemory()
     let conversationLog = ConversationLog()
+    let elevenLabs = ElevenLabsClient()
     private let audioCapture = AudioCaptureManager()
+    let voiceAgent = BlobVoiceAgent()
     private let locationWeather = LocationWeatherManager()
     private let taskContext = TaskContextManager()
     private var lastAudioContext: String = ""
@@ -136,6 +140,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
+
         // Disable stdout buffering so `blob log` shows output immediately
         setbuf(stdout, nil)
         setbuf(stderr, nil)
@@ -143,6 +149,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Wire shared memory + conversation log to OpenAI client
         openAI.memory = memory
         openAI.conversationLog = conversationLog
+        audioCapture.delegate = self
+        voiceAgent.delegate = self
 
         // Hide from dock
         NSApp.setActivationPolicy(.accessory)
@@ -190,14 +198,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             blobWindow?.orderFrontRegardless()
         }
 
-        // Start visual observation loop if enabled
+        // Start observation loops (change-detection gated — only speaks when something happens)
         if autonomousObservationsEnabled {
             startObservationLoop()
         }
-
         if ambientAwarenessEnabled {
             startAmbientAwarenessLoop()
         }
+
+        // Don't auto-start voice agent — toggle it on from the dashboard
+        listeningModeEnabled = false
 
 
         // Listen for blob tap
@@ -505,94 +515,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func blobTapped() {
-        clickCount += 1
-        print("🫧 Blob clicked \(clickCount) times")
-
-        // Reset counter after 2 seconds of no clicks
-        clickResetTimer?.invalidate()
-        clickResetTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
-            self?.clickCount = 0
-        }
-
-        if clickCount >= 8 {
-            print("🫧 BLOB IS ANGRY!")
-            clickCount = 0
-            clickResetTimer?.invalidate()
-
-            if let blobView = blobWindow?.contentView as? BlobNativeView {
-                blobView.setMood(.angry, animated: true)
-            }
-
-            let angryResponses = [
-                "Alright, now you're just being obnoxious.",
-                "Eight clicks? Pick a struggle.",
-                "I was cute about this at first. Now I'm mad.",
-                "Keep poking me and I will become a problem on purpose.",
-                "This is not enrichment for the blob.",
-                "You are testing my very small but very real patience."
-            ]
-
-            let randomResponse = angryResponses.randomElement() ?? "I am actively annoyed with you now."
-            self.showSpeechBubble(text: randomResponse, mood: .angry)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                if let blobView = self?.blobWindow?.contentView as? BlobNativeView {
-                    blobView.setMood(.annoyed, animated: true)
-                }
-            }
-
-            return
-        }
-
-        // If clicked 5+ times, Blob gets personally offended
-        if clickCount >= 5 {
-            print("🫧 BLOB IS OFFENDED!")
-            clickCount = 0
-            clickResetTimer?.invalidate()
-
-            // Make Blob offended
-            if let blobView = blobWindow?.contentView as? BlobNativeView {
-                blobView.setMood(.offended, animated: true)
-            }
-
-            let offendedResponses = [
-                "Oh, so we're mashing the sentient blob now? Rude.",
-                "Five clicks? Interesting. I've decided to take that personally.",
-                "Excuse me, I am a professional creature.",
-                "This is workplace disrespect in its purest form.",
-                "You poke like someone who ignores low battery warnings.",
-                "I'm not saying I'm offended. I'm radiating it, though.",
-                "That was unnecessary and frankly a little embarrassing for both of us.",
-                "You have wounded me emotionally and also cosmetically."
-            ]
-
-            let randomResponse = offendedResponses.randomElement() ?? "I cannot believe you've chosen disrespect."
-            self.showSpeechBubble(text: randomResponse, mood: .offended)
-
-            // Reset mood after 3 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                if let blobView = self?.blobWindow?.contentView as? BlobNativeView {
-                    blobView.setMood(.annoyed, animated: true)
-                }
-            }
-
-            return
-        }
-
-        // Normal behavior for 1-4 clicks — blob reacts but dashboard is in the menu bar now
-        if clickCount <= 2, Bool.random() {
-            let cuteResponses = [
-                "Hi. Tiny creature acknowledging your presence.",
-                "You poked me gently. I accept this.",
-                "Oh, attention? For me? Correct.",
-                "I am small and observant and suddenly invested.",
-                "Blob status: activated and a little smug."
-            ]
-
-            let randomResponse = cuteResponses.randomElement() ?? "Hello from your judgmental little desk creature."
-            let moods: [BlobMood] = [.playful, .delighted, .content]
-            self.showSpeechBubble(text: randomResponse, mood: moods.randomElement() ?? .content)
-        }
+        // Clicking blob does nothing — interact via voice or dashboard chat
     }
 
     private func setupStatusItem() {
@@ -670,14 +593,101 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func enableListeningMode() {
         self.listeningModeEnabled = true
-        startListening()
-        print("🎙️ Listening mode ON - persisted")
+        print("🎙️ Listening mode ON — connecting to ElevenLabs agent...")
+        voiceAgent.start()
     }
 
     func disableListeningMode() {
         self.listeningModeEnabled = false
-        stopListening()
-        print("🎙️ Listening mode OFF - persisted")
+        voiceAgent.stop()
+        print("🎙️ Listening mode OFF")
+    }
+
+    // MARK: - BlobVoiceAgentDelegate
+
+    func voiceAgentDidConnect() {
+        print("🗣️ Voice agent ready — talk to blob!")
+    }
+
+    func voiceAgentDidDisconnect() {
+        print("🗣️ Voice agent disconnected")
+    }
+
+    func voiceAgentUserSaid(_ text: String) {
+        guard !text.isEmpty else { return }
+        registerUserInteraction(text)
+    }
+
+    func voiceAgentStateChanged(_ state: String) {
+        DispatchQueue.main.async {
+            if let blobView = self.blobWindow?.contentView as? BlobNativeView {
+                switch state {
+                case "listening": blobView.setMood(.curious, animated: true)
+                default: break
+                }
+            }
+        }
+    }
+
+    func voiceAgentBlobSaid(_ text: String) {
+        guard !text.isEmpty else { return }
+
+        // Parse mood tag from agent response (e.g. "[annoyed] ugh, finally")
+        let parsed = openAI.parseMoodTag(from: text)
+        let mood = parsed.mood
+        let cleanText = parsed.text
+
+        conversationLog.logChat(userMessage: "", blobResponse: cleanText, mood: mood.rawValue)
+        lastSpeechTime = Date()
+        lastChangeTime = Date()
+        silenceMutterSent = false
+        showSpeechBubble(text: cleanText, mood: mood)
+    }
+
+    // MARK: - Voice Conversation (Mic → Whisper → Chat → ElevenLabs)
+
+    func audioCaptureDidDetectSpeech(_ audioData: Data) {
+        let pipelineStart = Date()
+        print("🎙️ Transcribing speech (\(audioData.count / 1024)KB)...")
+
+        openAI.transcribeAudio(audioData: audioData) { [weak self] transcription in
+            guard let self = self else { return }
+            let whisperMs = Int(Date().timeIntervalSince(pipelineStart) * 1000)
+
+            let text = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, text.count > 2 else {
+                print("🎙️ Transcription empty or too short, ignoring (\(whisperMs)ms)")
+                return
+            }
+
+            print("🎙️ User said: \"\(text)\" [whisper: \(whisperMs)ms]")
+            self.registerUserInteraction(text)
+
+            let gptStart = Date()
+            let contextInfo = self.getContextInfo()
+            let taskContext = self.workModeEnabled ? self.getTaskContext() : ""
+            let fullContext = [contextInfo, taskContext].filter { !$0.isEmpty }.joined(separator: "\n\n")
+
+            self.openAI.chat(message: text, contextInfo: fullContext) { [weak self] response, mood in
+                guard let self = self else { return }
+                let gptMs = Int(Date().timeIntervalSince(gptStart) * 1000)
+                let totalMs = Int(Date().timeIntervalSince(pipelineStart) * 1000)
+
+                print("🎙️ Blob replies: \"\(response)\" [gpt: \(gptMs)ms, total: \(totalMs)ms]")
+
+                self.conversationLog.logChat(userMessage: text, blobResponse: response, mood: mood.rawValue)
+                self.lastSpeechTime = Date()
+                self.lastChangeTime = Date()
+                self.silenceMutterSent = false
+
+                let conversation = "\(text) -> \(response)"
+                self.memory.extractMemories(from: conversation, usingOpenAI: self.openAI) {}
+
+                DispatchQueue.main.async {
+                    self.showSpeechBubble(text: response, mood: mood)
+                }
+            }
+        }
     }
 
     func enableAutonomousObservations() {
@@ -850,6 +860,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Attach bubble as child window so it moves with the blob
         blobWindow?.addChildWindow(bubble, ordered: .above)
+
+        // Speak aloud via ElevenLabs TTS (skip if voice agent is handling audio)
+        if !voiceAgent.isActive {
+            elevenLabs.speak(text)
+        }
 
         NotificationCenter.default.post(
             name: .blobSpoke,

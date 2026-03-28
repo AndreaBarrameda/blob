@@ -22,6 +22,7 @@ swift build && swift run VirtualAssistant
 - macOS 13+
 - Swift 5.9+
 - OpenAI API key in `.env` file (`OPENAI_API_KEY=sk-...`)
+- ElevenLabs API key + voice ID in `.env` file (`ELEVENLABS_API_KEY=...`, `ELEVENLABS_VOICE_ID=...`) — optional, voice disabled if missing
 - `.env` search order: next to binary, project root, cwd, home dir
 
 ### macOS Permissions (prompted on first run)
@@ -78,6 +79,7 @@ NSView with custom `draw(_:)` rendering:
 - **ContentCapture** — Clipboard + focused text field (Accessibility API) + InputAwarenessManager (key/mouse events)
 - **InputAwarenessManager** — Global key/mouse event monitoring, 90-second retention window
 - **AudioCaptureManager** — PCM audio capture + WAV conversion (Whisper pipeline incomplete — captures but doesn't transcribe)
+- **ElevenLabsClient** — Text-to-speech via ElevenLabs API (eleven_turbo_v2_5 model, async fire-and-forget, AVAudioPlayer playback). Toggle in dashboard.
 - **SpotifyController** — AppleScript-based playback control + track info
 - **SystemControl** — App launching, shell commands (with destructive command blocklist), file browsing
 
@@ -108,6 +110,7 @@ Sources/VirtualAssistant/
 ├── BlobNativeView.swift          # Organic blob rendering + animations
 ├── BlobMemory.swift              # MEMORY.md read/write
 ├── ConversationLog.swift         # CONVERSATION.md — full exchange history + recent context for LLM
+├── ElevenLabsClient.swift        # TTS via ElevenLabs API — speaks every speech bubble aloud
 ├── DashboardView.swift           # SwiftUI dashboard + ChatMessage/ChatBubble types
 ├── SpeechBubbleView.swift        # Speech bubble window
 ├── SystemAwareness.swift         # Real CPU/memory/disk via macOS APIs

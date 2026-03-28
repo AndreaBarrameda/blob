@@ -9,7 +9,15 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "VirtualAssistant",
-            dependencies: []
+            dependencies: [],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/VirtualAssistant/Info.plist"
+                ])
+            ]
         )
     ]
 )
