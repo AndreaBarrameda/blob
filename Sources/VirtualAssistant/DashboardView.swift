@@ -21,6 +21,8 @@ struct DashboardView: View {
     @State private var mindStateInfo = ""
     @State private var showSystemControl = false
     @State private var chatTimeoutTimer: Timer?
+    @State private var panelPinned = true
+    @State private var panelOpacity: Double = 1.0
 
     private var openAI: OpenAIClient {
         AppDelegate.shared?.openAI ?? OpenAIClient()
@@ -276,6 +278,49 @@ struct DashboardView: View {
                 }
                 .padding(10)
                 .background(Color(red: 1.0, green: 0.92, blue: 0.95))
+            }
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
+            // Panel settings — pin + transparency
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: panelPinned ? "pin.fill" : "pin.slash")
+                        .font(.callout)
+                        .foregroundColor(panelPinned ? .blue : .gray)
+
+                    Text("Keep on Screen")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    Spacer()
+
+                    Toggle(isOn: $panelPinned) { EmptyView() }
+                        .labelsHidden()
+                        .onChange(of: panelPinned) { newValue in
+                            AppDelegate.shared?.setDashboardPinned(newValue)
+                        }
+                }
+                .padding(10)
+                .background(Color(red: 0.93, green: 0.95, blue: 0.98))
+
+                HStack(spacing: 12) {
+                    Image(systemName: "circle.lefthalf.striped.horizontal")
+                        .font(.callout)
+                        .foregroundColor(.gray)
+
+                    Text("Opacity")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    Slider(value: $panelOpacity, in: 0.3...1.0, step: 0.05)
+                        .onChange(of: panelOpacity) { newValue in
+                            AppDelegate.shared?.setDashboardOpacity(newValue)
+                        }
+                }
+                .padding(10)
+                .background(Color(red: 0.93, green: 0.95, blue: 0.98))
             }
             .border(Color.gray.opacity(0.3), width: 0.5)
 
@@ -682,9 +727,12 @@ struct DashboardView: View {
                 updateCurrentTrack()
                 publishDashboardState()
 
-                // Update blob mood from LLM response
-                if let blobView = AppDelegate.shared?.blobWindow?.contentView as? BlobNativeView {
-                    blobView.setMood(mood, animated: true)
+                // Update blob mood and show speech bubble
+                if let appDelegate = AppDelegate.shared {
+                    if let blobView = appDelegate.blobWindow?.contentView as? BlobNativeView {
+                        blobView.setMood(mood, animated: true)
+                    }
+                    appDelegate.showSpeechBubbleFromChat(text: response, mood: mood)
                 }
 
                 // Log to conversation history

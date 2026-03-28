@@ -530,9 +530,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     }
 
     @objc private func statusItemClicked() {
-        if let dashboardWindow = dashboardWindow, dashboardWindow.isVisible {
-            dashboardWindow.orderOut(nil)
-            self.dashboardWindow = nil
+        if let panel = dashboardWindow, panel.isVisible {
+            panel.orderOut(nil)
             NotificationCenter.default.post(name: NSNotification.Name("DashboardClosed"), object: nil)
         } else {
             showDashboard()
@@ -540,17 +539,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     }
 
     private func showDashboard() {
+        // Reuse existing panel if it was just hidden
+        if let panel = dashboardWindow {
+            panel.makeKeyAndOrderFront(nil)
+            panel.orderFrontRegardless()
+            NotificationCenter.default.post(name: NSNotification.Name("DashboardOpened"), object: nil)
+            return
+        }
+
         let dashboardView = DashboardView()
         let hostingController = NSHostingController(rootView: dashboardView)
 
         let blobFrame = blobWindow?.frame ?? NSRect(x: 100, y: 400, width: 300, height: 300)
-        // Position dashboard right next to blob (to the right)
         let dashboardX = blobFrame.maxX + 20
         let dashboardY = blobFrame.midY - 260
 
         let dashboardPanel = NSPanel(
             contentRect: NSRect(x: dashboardX, y: dashboardY, width: 420, height: 600),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -561,12 +567,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         dashboardPanel.isMovableByWindowBackground = true
         dashboardPanel.level = .floating
         dashboardPanel.isReleasedWhenClosed = false
+        dashboardPanel.hidesOnDeactivate = false
         dashboardPanel.backgroundColor = NSColor(red: 0.95, green: 0.95, blue: 0.97, alpha: 1.0)
-        dashboardPanel.collectionBehavior = [.transient]
+        dashboardPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         dashboardPanel.makeKeyAndOrderFront(nil)
         self.dashboardWindow = dashboardPanel
         NotificationCenter.default.post(name: NSNotification.Name("DashboardOpened"), object: nil)
+    }
+
+    func setDashboardPinned(_ pinned: Bool) {
+        guard let panel = dashboardWindow else { return }
+        if pinned {
+            panel.level = .floating
+            panel.hidesOnDeactivate = false
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        } else {
+            panel.level = .floating
+            panel.hidesOnDeactivate = false
+            panel.collectionBehavior = [.fullScreenAuxiliary]
+        }
+    }
+
+    func setDashboardOpacity(_ opacity: Double) {
+        dashboardWindow?.backgroundColor = NSColor(red: 0.95, green: 0.95, blue: 0.97, alpha: CGFloat(opacity))
+        dashboardWindow?.isOpaque = false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -841,6 +866,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         }
     }
 
+
+    /// Public entry point for DashboardView to trigger speech bubbles on chat responses.
+    func showSpeechBubbleFromChat(text: String, mood: BlobMood) {
+        showSpeechBubble(text: text, mood: mood)
+    }
 
     private func showSpeechBubble(text: String, mood: BlobMood = .content) {
         // Close previous bubble
