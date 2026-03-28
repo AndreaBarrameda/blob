@@ -26,8 +26,9 @@ class BlobVoiceAgent: NSObject, URLSessionWebSocketDelegate {
     // Audio config — ElevenLabs uses PCM 16kHz mono signed 16-bit LE
     private let outputSampleRate: Double = 16000
     private var inputSampleRate: Double = 48000
+    // Use Float32 — Int16 isn't supported by all hardware (kAudioUnitErr_FormatNotSupported -10868)
     private lazy var outputFormat: AVAudioFormat = {
-        AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: outputSampleRate, channels: 1, interleaved: true)!
+        AVAudioFormat(standardFormatWithSampleRate: outputSampleRate, channels: 1)!
     }()
 
     // Audio buffering — accumulate small chunks before scheduling
@@ -200,8 +201,17 @@ class BlobVoiceAgent: NSObject, URLSessionWebSocketDelegate {
         playerNode = AVAudioPlayerNode()
         guard let engine = outputEngine, let player = playerNode else { return }
 
+        // Insert an intermediate mixer to handle mono 16kHz → hardware format conversion
+        let formatMixer = AVAudioMixerNode()
         engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: outputFormat)
+        engine.attach(formatMixer)
+        let hwFormat = engine.outputNode.outputFormat(forBus: 0)
+        print("🗣️ [audio] Hardware format: \(hwFormat)")
+        print("🗣️ [audio] Player format: \(outputFormat)")
+        // Player → formatMixer using our Float32 mono 16kHz format
+        engine.connect(player, to: formatMixer, format: outputFormat)
+        // formatMixer → mainMixer with no format specified — engine picks compatible hardware format
+        engine.connect(formatMixer, to: engine.mainMixerNode, format: nil)
 
         do {
             try engine.start()
@@ -249,12 +259,22 @@ class BlobVoiceAgent: NSObject, URLSessionWebSocketDelegate {
 
         let sampleCount = data.count / 2
         guard sampleCount > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(sampleCount)) else { return }
+              let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(sampleCount)) else {
+            print("🗣️ [audio] Failed to create buffer: sampleCount=\(sampleCount) format=\(outputFormat)")
+            return
+        }
 
         buffer.frameLength = AVAudioFrameCount(sampleCount)
+
+        // Convert incoming Int16 PCM → Float32 (AVAudioEngine prefers Float32)
+        guard let floatChannel = buffer.floatChannelData?[0] else {
+            print("🗣️ [audio] floatChannelData is nil — format=\(outputFormat)")
+            return
+        }
         data.withUnsafeBytes { rawPtr in
-            if let src = rawPtr.baseAddress {
-                memcpy(buffer.int16ChannelData![0], src, data.count)
+            let int16Ptr = rawPtr.bindMemory(to: Int16.self)
+            for i in 0..<sampleCount {
+                floatChannel[i] = Float(int16Ptr[i]) / 32768.0
             }
         }
 
