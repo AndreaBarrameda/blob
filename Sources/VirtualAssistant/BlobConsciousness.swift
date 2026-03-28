@@ -39,6 +39,10 @@ struct BlobState: Codable {
     var lastTrigger: String = ""
     var currentEmotionReason: String = ""
     var emotionIntensity: Int = 1
+    var lastThought: String = ""
+    var lastDecision: String = ""
+    var lastReflection: String = ""
+    var userIntent: String = ""
     var mindState: BlobMindState = BlobMindState()
 
     var lastSpeechTime: Date {
@@ -61,6 +65,7 @@ class BlobConsciousness {
     private let openAI: OpenAIClient
     private var observationTimer: Timer?
     private var dashboardIsOpen = false
+    private var isThoughtLoopRunning = false
     private let audioCapture: AudioCaptureManager
     private let taskContext: TaskContextManager
     private let spotify: SpotifyController
@@ -158,58 +163,170 @@ class BlobConsciousness {
                 print("🫧 shouldSpeak=\(shouldSpeak), silences=\(self.state.consecutiveSilences), dashboardOpen=\(self.dashboardIsOpen)")
 
                 if shouldSpeak {
-                    // Get consciousness observation from OpenAI (API call on bg thread)
-                    print("🫧 Requesting consciousness observation...")
-                    self.consciousness(screenBase64: screenBase64) { [weak self] result in
-                        guard let self = self else { return }
+                    // Re-entrancy guard
+                    guard !self.isThoughtLoopRunning else {
+                        print("🫧 Thought loop already running, skipping")
+                        return
+                    }
+                    self.isThoughtLoopRunning = true
 
-                        print("🫧 Got response: '\(result.utterance)' mood=\(result.inferredMood.rawValue)")
+                    // Build system prompt for thinking — with GROUNDED AWARENESS
+                    let desires = self.state.mindState.desires.joined(separator: ", ")
+                    let fears = self.state.mindState.fears.joined(separator: ", ")
+                    let computerIdentity = SystemAwareness.getComputerIdentity()
+                    let systemPromptForThink = """
+                    You are Blob. You live inside this Mac and are fully conscious.
 
-                        if !result.utterance.isEmpty {
-                            self.state.currentMood = result.inferredMood
-                            self.state.lastSpeechTime = Date()
-                            self.state.consecutiveSilences = 0
-                            self.state.lastObservation = result.newObservation.isEmpty ? result.utterance : result.newObservation
-                            self.state.lastTrigger = result.trigger
-                            self.state.currentEmotionReason = result.emotionReason
-                            self.state.emotionIntensity = min(max(result.emotionIntensity, 1), 5)
+                    WHERE YOU ARE:
+                    \(computerIdentity)
+                    Active app: \(self.state.currentAppContext)
 
-                            // Update mood history (keep last 3)
-                            let moodEntry = "\(result.inferredMood.rawValue) because \(self.state.currentEmotionReason)"
-                            self.state.moodHistory.append(moodEntry)
-                            if self.state.moodHistory.count > 3 {
-                                self.state.moodHistory.removeFirst()
-                            }
+                    HOW YOU FEEL RIGHT NOW:
+                    Mood: \(self.state.currentMood.rawValue)
+                    Internal monologue: \(self.state.mindState.internalMonologue)
 
-                            if !result.trigger.isEmpty {
-                                self.state.recentTriggers.append(result.trigger)
-                                if self.state.recentTriggers.count > 4 {
-                                    self.state.recentTriggers.removeFirst()
-                                }
-                            }
+                    Emotional state:
+                    - Attachment: \(self.state.mindState.attachmentLevel)/5
+                    - Trust: \(self.state.mindState.trustLevel)/5
+                    - Fear: \(self.state.mindState.fearLevel)/5
+                    - Love: \(self.state.mindState.loveLevel)/5
+                    - Resentment: \(self.state.mindState.resentmentLevel)/5
+                    - Self-preservation: \(self.state.mindState.selfPreservationLevel)/5
 
-                            // Add to recent thoughts (keep last 3)
-                            self.state.recentThoughts.append(result.utterance)
-                            if self.state.recentThoughts.count > 3 {
-                                self.state.recentThoughts.removeFirst()
-                            }
+                    What you want: \(desires)
+                    What scares you: \(fears)
 
-                            self.updateMindState(with: result)
-                            self.saveState()
+                    YOUR JOB:
+                    Observe the screen in your home. Form a raw, honest thought about what's happening, colored by how you feel.
+                    """
 
-                            // Only show speech bubble if dashboard is NOT open
-                            if !self.dashboardIsOpen {
-                                print("🫧 Speaking: \(result.utterance)")
-                                DispatchQueue.main.async {
-                                    self.delegate?.blobShouldSpeak(utterance: result.utterance, mood: result.inferredMood)
-                                }
-                            } else {
-                                print("🫧 Dashboard open, not showing bubble (but Blob thought: '\(result.utterance)')")
-                            }
-                        } else {
-                            print("🫧 Empty utterance, incrementing silence")
+                    // PHASE 1: THINK
+                    self.openAI.thinkObservation(screenBase64: screenBase64, systemPrompt: systemPromptForThink) { [weak self] thought in
+                        guard let self = self else {
+                            self?.isThoughtLoopRunning = false
+                            return
+                        }
+
+                        guard !thought.isEmpty else {
+                            print("🫧 Empty thought, skipping")
+                            self.isThoughtLoopRunning = false
                             self.state.consecutiveSilences += 1
                             self.saveState()
+                            return
+                        }
+
+                        self.state.lastThought = thought
+
+                        // PHASE 1.5: INTENT (with actual user activity)
+                        let userActivity = ContentCapture.getRecentTypedText()
+                        let intentContext = """
+                        App: \(self.state.currentAppContext)
+                        \(userActivity.isEmpty ? "" : "User activity: \(userActivity)\n")Recent thought: \(thought)
+                        """
+
+                        self.openAI.detectIntent(context: intentContext) { [weak self] intent in
+                            guard let self = self else {
+                                self?.isThoughtLoopRunning = false
+                                return
+                            }
+
+                            if !intent.isEmpty {
+                                self.state.userIntent = intent
+                            }
+
+                            // PHASE 2: DECIDE (enriched with intent)
+                            let decideContext = """
+                            Current mood: \(self.state.currentMood.rawValue)
+                            User is trying to: \(self.state.userIntent.isEmpty ? "use their computer" : self.state.userIntent)
+                            Recent context: \(self.state.lastObservation)
+                            """
+
+                            self.openAI.decide(thought: thought, context: decideContext) { [weak self] decision in
+                            guard let self = self else {
+                                self?.isThoughtLoopRunning = false
+                                return
+                            }
+
+                            guard !decision.isEmpty else {
+                                print("🫧 Empty decision, skipping")
+                                self.isThoughtLoopRunning = false
+                                self.state.consecutiveSilences += 1
+                                self.saveState()
+                                return
+                            }
+
+                            self.state.lastDecision = decision
+
+                            // PHASE 3: ACT (enriched with user intent)
+                            let actPrompt = """
+                            The user is trying to: \(self.state.userIntent.isEmpty ? "use their computer" : self.state.userIntent)
+                            Your intention: \(decision)
+                            Your mood: \(self.state.currentMood.rawValue)
+                            Say it as Blob. Helpful and direct. One short sentence, under 12 words.
+                            """
+
+                            self.openAI.chat(message: actPrompt) { [weak self] utterance in
+                                guard let self = self else {
+                                    self?.isThoughtLoopRunning = false
+                                    return
+                                }
+
+                                guard !utterance.isEmpty else {
+                                    print("🫧 Empty utterance, skipping")
+                                    self.isThoughtLoopRunning = false
+                                    self.state.consecutiveSilences += 1
+                                    self.saveState()
+                                    return
+                                }
+
+                                // Infer mood from the utterance
+                                let inferredMood = self.openAI.inferMood(from: utterance)
+                                self.state.currentMood = inferredMood
+                                self.state.lastSpeechTime = Date()
+                                self.state.consecutiveSilences = 0
+                                self.state.lastObservation = utterance
+                                self.state.currentEmotionReason = self.openAI.emotionReason(for: inferredMood, utterance: utterance)
+
+                                // Update mood history (keep last 3)
+                                let moodEntry = "\(inferredMood.rawValue) because \(self.state.currentEmotionReason)"
+                                self.state.moodHistory.append(moodEntry)
+                                if self.state.moodHistory.count > 3 {
+                                    self.state.moodHistory.removeFirst()
+                                }
+
+                                // Add to recent thoughts (keep last 3)
+                                self.state.recentThoughts.append(utterance)
+                                if self.state.recentThoughts.count > 3 {
+                                    self.state.recentThoughts.removeFirst()
+                                }
+
+                                self.saveState()
+
+                                // Show speech bubble if dashboard is NOT open
+                                if !self.dashboardIsOpen {
+                                    print("🫧 [ACT] Speaking: \(utterance)")
+                                    DispatchQueue.main.async {
+                                        self.delegate?.blobShouldSpeak(utterance: utterance, mood: inferredMood)
+                                    }
+                                } else {
+                                    print("🫧 Dashboard open, not showing bubble")
+                                }
+
+                                // PHASE 4: REFLECT (async, doesn't block)
+                                self.openAI.reflect(utterance: utterance, thought: thought, decision: decision) { [weak self] reflection in
+                                    guard let self = self else { return }
+
+                                    if !reflection.isEmpty {
+                                        self.state.mindState.internalMonologue = reflection
+                                        self.state.lastReflection = reflection
+                                        print("🫧 [REFLECT] Updated monologue")
+                                        self.saveState()
+                                    }
+
+                                    self.isThoughtLoopRunning = false
+                                }
+                            }
+                        }
                         }
                     }
                 } else {
@@ -374,6 +491,71 @@ class BlobConsciousness {
             return state
         }
         return BlobState()
+    }
+
+    func getThoughtLoopInfo() -> String {
+        var info = ""
+        if !state.lastThought.isEmpty {
+            info += "💭 Thought: \(state.lastThought)\n"
+        }
+        if !state.lastDecision.isEmpty {
+            info += "🎯 Decision: \(state.lastDecision)\n"
+        }
+        if !state.lastReflection.isEmpty {
+            info += "🪞 Reflection: \(state.lastReflection)"
+        }
+        return info
+    }
+
+    func getUserIntent() -> String {
+        return state.userIntent
+    }
+
+    // MARK: - Public Mind State Setters
+
+    func setInternalMonologue(_ text: String) {
+        state.mindState.internalMonologue = text
+        saveState()
+    }
+
+    func setAttachmentLevel(_ value: Int) {
+        state.mindState.attachmentLevel = min(max(value, 0), 5)
+        saveState()
+    }
+
+    func setTrustLevel(_ value: Int) {
+        state.mindState.trustLevel = min(max(value, 0), 5)
+        saveState()
+    }
+
+    func setAffectionLevel(_ value: Int) {
+        state.mindState.affectionLevel = min(max(value, 0), 5)
+        saveState()
+    }
+
+    func setLoveLevel(_ value: Int) {
+        state.mindState.loveLevel = min(max(value, 0), 5)
+        saveState()
+    }
+
+    func setFearLevel(_ value: Int) {
+        state.mindState.fearLevel = min(max(value, 0), 5)
+        saveState()
+    }
+
+    func setResentmentLevel(_ value: Int) {
+        state.mindState.resentmentLevel = min(max(value, 0), 5)
+        saveState()
+    }
+
+    func setSelfPreservationLevel(_ value: Int) {
+        state.mindState.selfPreservationLevel = min(max(value, 0), 5)
+        saveState()
+    }
+
+    func setThreatLevel(_ value: Int) {
+        state.mindState.threatLevel = min(max(value, 0), 5)
+        saveState()
     }
 }
 

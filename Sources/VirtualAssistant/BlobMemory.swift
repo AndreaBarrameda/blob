@@ -2,15 +2,17 @@ import Foundation
 import Combine
 
 struct Memory: Codable {
+    let id: UUID
     let fact: String
     let timestamp: Date
-    let category: String  // "preference", "fact", "interest", etc.
+    let category: String  // "preference", "fact", "interest", "short_term", "long_term", "emotional"
 
     enum CodingKeys: String, CodingKey {
-        case fact, timestamp, category
+        case id, fact, timestamp, category
     }
 
-    init(fact: String, timestamp: Date, category: String) {
+    init(fact: String, timestamp: Date, category: String, id: UUID = UUID()) {
+        self.id = id
         self.fact = fact
         self.timestamp = timestamp
         self.category = category
@@ -18,6 +20,14 @@ struct Memory: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // Handle id with backwards compatibility
+        if let decodedId = try? container.decode(UUID.self, forKey: .id) {
+            id = decodedId
+        } else {
+            id = UUID()
+        }
+
         fact = try container.decode(String.self, forKey: .fact)
         category = try container.decode(String.self, forKey: .category)
 
@@ -34,6 +44,7 @@ struct Memory: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
         try container.encode(fact, forKey: .fact)
         try container.encode(category, forKey: .category)
         try container.encode(timestamp.timeIntervalSince1970, forKey: .timestamp)
@@ -98,6 +109,27 @@ class BlobMemory: ObservableObject {
         }
 
         return summary
+    }
+
+    func deleteMemory(id: UUID) {
+        memories.removeAll { $0.id == id }
+        saveMemories()
+    }
+
+    func getMemoriesByCategory(_ category: String) -> [Memory] {
+        return memories.filter { $0.category == category }
+    }
+
+    func pruneExpiredMemories() {
+        let twentyFourHoursAgo = Date().addingTimeInterval(-86400)
+        let beforePrune = memories.count
+        memories.removeAll { memory in
+            memory.category == "short_term" && memory.timestamp < twentyFourHoursAgo
+        }
+        if memories.count < beforePrune {
+            print("🧠 Pruned \(beforePrune - memories.count) expired short-term memories")
+            saveMemories()
+        }
     }
 
     func extractMemories(from conversation: String, usingOpenAI openAI: OpenAIClient, completion: @escaping () -> Void) {

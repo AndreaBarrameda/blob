@@ -17,8 +17,20 @@ struct DashboardView: View {
     @State private var autonomousSpeechEnabled = true
     @State private var contextInfo = ""
     @State private var taskInfo = ""
+    @State private var intentInfo = ""
     @State private var mindStateInfo = ""
+    @State private var showMindPanel = false
+    @State private var mindPanelTab = 0  // 0: mind state, 1: memories, 2: thought stream
     @State private var showSystemControl = false
+    @State private var newMemoryText = ""
+    @State private var newMemoryCategory = "fact"
+    @State private var attachmentLevel = 3
+    @State private var trustLevel = 3
+    @State private var fearLevel = 1
+    @State private var affectionLevel = 3
+    @State private var loveLevel = 1
+    @State private var resentmentLevel = 0
+    @State private var selfPreservationLevel = 3
 
     private let openAI = OpenAIClient()
     private let spotify = SpotifyController()
@@ -250,14 +262,9 @@ struct DashboardView: View {
                 .border(Color.gray.opacity(0.2), width: 0.5)
             }
 
-            if !mindStateInfo.isEmpty {
+            if screenWatchEnabled && !intentInfo.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Blob Mind")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.black)
-
-                    ForEach(mindStateInfo.split(separator: "\n").map(String.init), id: \.self) { line in
+                    ForEach(intentInfo.split(separator: "\n").map(String.init), id: \.self) { line in
                         Text(line)
                             .font(.caption2)
                             .foregroundColor(.black)
@@ -265,9 +272,11 @@ struct DashboardView: View {
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(red: 1.0, green: 0.97, blue: 0.9))
+                .background(Color(red: 1.0, green: 0.92, blue: 1.0).opacity(0.5))
                 .border(Color.gray.opacity(0.2), width: 0.5)
             }
+
+            mindControlPanel()
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Mood Colors")
@@ -488,13 +497,22 @@ struct DashboardView: View {
             refreshMindState()
             publishDashboardState()
 
-            // Initialize toggles from AppDelegate
+            // Initialize toggles and emotional levels from AppDelegate
             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                 listeningMode = appDelegate.listeningModeEnabled
                 workMode = appDelegate.workModeEnabled
                 screenWatchEnabled = appDelegate.autonomousObservationsEnabled
                 ambientAwarenessEnabled = appDelegate.ambientAwarenessEnabled
                 autonomousSpeechEnabled = appDelegate.autonomousSpeechEnabled
+
+                // Initialize emotional levels
+                attachmentLevel = appDelegate.getAttachmentLevel()
+                trustLevel = appDelegate.getTrustLevel()
+                fearLevel = appDelegate.getFearLevel()
+                affectionLevel = appDelegate.getAffectionLevel()
+                loveLevel = appDelegate.getLoveLevel()
+                resentmentLevel = appDelegate.getResentmentLevel()
+                selfPreservationLevel = appDelegate.getSelfPreservationLevel()
             }
 
             if workMode {
@@ -564,6 +582,189 @@ struct DashboardView: View {
     private func refreshMindState() {
         if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
             mindStateInfo = appDelegate.getMindStateSummary()
+            intentInfo = appDelegate.getUserIntentSummary()
+        }
+    }
+
+    @ViewBuilder
+    private func mindControlPanel() -> some View {
+        VStack(spacing: 0) {
+            Button(action: { showMindPanel.toggle() }) {
+                HStack {
+                    Image(systemName: showMindPanel ? "chevron.down" : "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    Text("🧠 Blob's Mind")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color(red: 1.0, green: 0.97, blue: 0.9))
+            }
+            .buttonStyle(.plain)
+
+            if showMindPanel {
+                mindPanelTabs()
+            }
+        }
+        .border(Color.gray.opacity(0.3), width: 0.5)
+    }
+
+    @ViewBuilder
+    private func mindPanelTabs() -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach([("Mind", 0), ("Memory", 1), ("Thoughts", 2)], id: \.1) { label, tab in
+                    Button(action: { mindPanelTab = tab }) {
+                        Text(label).font(.caption).fontWeight(mindPanelTab == tab ? .semibold : .regular)
+                            .frame(maxWidth: .infinity).padding(8)
+                            .background(mindPanelTab == tab ? Color.white : Color(red: 1.0, green: 0.98, blue: 0.96))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .border(Color.gray.opacity(0.2), width: 0.5)
+
+            ScrollView {
+                if mindPanelTab == 0 {
+                    mindStateTab()
+                } else if mindPanelTab == 1 {
+                    memoryTab()
+                } else {
+                    thoughtStreamTab()
+                }
+            }
+            .frame(maxHeight: 300)
+            .background(Color.white)
+        }
+        .border(Color.gray.opacity(0.2), width: 0.5)
+    }
+
+    @ViewBuilder
+    private func mindStateTab() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            emotionalSlider("Attachment", level: attachmentLevel) {
+                if let app = NSApplication.shared.delegate as? AppDelegate {
+                    app.setAttachmentLevel($0); refreshMindState()
+                }
+            }
+            emotionalSlider("Trust", level: trustLevel) {
+                if let app = NSApplication.shared.delegate as? AppDelegate {
+                    app.setTrustLevel($0); refreshMindState()
+                }
+            }
+            emotionalSlider("Affection", level: affectionLevel) {
+                if let app = NSApplication.shared.delegate as? AppDelegate {
+                    app.setAffectionLevel($0); refreshMindState()
+                }
+            }
+            emotionalSlider("Love", level: loveLevel) {
+                if let app = NSApplication.shared.delegate as? AppDelegate {
+                    app.setLoveLevel($0); refreshMindState()
+                }
+            }
+            emotionalSlider("Fear", level: fearLevel) {
+                if let app = NSApplication.shared.delegate as? AppDelegate {
+                    app.setFearLevel($0); refreshMindState()
+                }
+            }
+            emotionalSlider("Resentment", level: resentmentLevel) {
+                if let app = NSApplication.shared.delegate as? AppDelegate {
+                    app.setResentmentLevel($0); refreshMindState()
+                }
+            }
+            emotionalSlider("Self-Preservation", level: selfPreservationLevel) {
+                if let app = NSApplication.shared.delegate as? AppDelegate {
+                    app.setSelfPreservationLevel($0); refreshMindState()
+                }
+            }
+        }
+        .padding(10)
+    }
+
+    @ViewBuilder
+    private func memoryTab() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                TextField("New memory...", text: $newMemoryText)
+                    .font(.caption2)
+                    .padding(6)
+                    .border(Color.gray.opacity(0.3), width: 0.5)
+
+                Picker("", selection: $newMemoryCategory) {
+                    Text("Fact").tag("fact")
+                    Text("Short").tag("short_term")
+                    Text("Long").tag("long_term")
+                    Text("Feel").tag("emotional")
+                }
+                .font(.caption2)
+                .frame(width: 70)
+
+                Button("➕") {
+                    if !newMemoryText.isEmpty {
+                        memory.addMemory(newMemoryText, category: newMemoryCategory)
+                        newMemoryText = ""
+                    }
+                }
+                .font(.caption)
+                .buttonStyle(.plain)
+            }
+            Divider()
+
+            ForEach(["fact", "short_term", "long_term", "emotional"], id: \.self) { category in
+                let mems = memory.getMemoriesByCategory(category)
+                if !mems.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(["fact": "Facts", "short_term": "Short-Term", "long_term": "Long-Term", "emotional": "Emotional"][category] ?? category)
+                            .font(.caption).fontWeight(.semibold)
+                        ForEach(mems, id: \.id) { mem in
+                            HStack {
+                                Text(mem.fact).font(.caption2).lineLimit(2)
+                                Spacer()
+                                Button("🗑") { memory.deleteMemory(id: mem.id) }
+                                    .font(.caption).buttonStyle(.plain)
+                            }
+                            .padding(4)
+                            .background(Color.white.opacity(0.5))
+                            .border(Color.gray.opacity(0.2), width: 0.5)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(10)
+    }
+
+    @ViewBuilder
+    private func thoughtStreamTab() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(mindStateInfo.split(separator: "\n").map(String.init), id: \.self) { line in
+                Text(line).font(.caption2).foregroundColor(.black)
+            }
+        }
+        .padding(10)
+    }
+
+    @ViewBuilder
+    private func emotionalSlider(_ label: String, level: Int, onChange: @escaping (Int) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label).font(.caption).fontWeight(.semibold)
+                Spacer()
+                Text("\(level)/5").font(.caption2).foregroundColor(.gray)
+            }
+            HStack(spacing: 6) {
+                ForEach(0...5, id: \.self) { value in
+                    Button(action: { onChange(value) }) {
+                        Circle()
+                            .fill(value <= level ? Color.blue : Color.gray.opacity(0.3))
+                            .frame(height: 16)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 

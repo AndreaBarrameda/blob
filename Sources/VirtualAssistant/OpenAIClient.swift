@@ -583,7 +583,7 @@ class OpenAIClient {
         }.resume()
     }
 
-    private func emotionReason(for mood: BlobMood, utterance: String) -> String {
+    func emotionReason(for mood: BlobMood, utterance: String) -> String {
         switch mood {
         case .delighted:
             return "something on screen genuinely impressed Blob"
@@ -620,5 +620,323 @@ class OpenAIClient {
         case .curious, .content:
             return 2
         }
+    }
+
+    // THOUGHT LOOP PHASE: THINK
+    func thinkObservation(screenBase64: String, systemPrompt: String, completion: @escaping (String) -> Void) {
+        let url = URL(string: "\(baseURL)/chat/completions")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: Any] = [
+            "model": "gpt-4o",
+            "max_tokens": 150,
+            "temperature": 0.85,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemPrompt
+                ],
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "image_url",
+                            "image_url": [
+                                "url": "data:image/jpeg;base64,\(screenBase64)"
+                            ]
+                        ],
+                        [
+                            "type": "text",
+                            "text": "Look at the screen. What do you notice? What's your gut reaction? Think out loud, 2-3 sentences max."
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        print("🫧 [THINK] Making vision call...")
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("🫧 [THINK] Error: \(error.localizedDescription)")
+                completion("")
+                return
+            }
+
+            guard let data = data else {
+                print("🫧 [THINK] No data returned")
+                completion("")
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let error = json["error"] as? [String: Any] {
+                        print("🫧 [THINK] API Error: \(error)")
+                        completion("")
+                        return
+                    }
+
+                    if let choices = json["choices"] as? [[String: Any]],
+                       let firstChoice = choices.first,
+                       let message = firstChoice["message"] as? [String: Any],
+                       let content = message["content"] as? String {
+                        let thought = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                        print("🫧 [THINK] \(thought)")
+                        completion(thought)
+                    } else {
+                        print("🫧 [THINK] Could not parse response")
+                        completion("")
+                    }
+                }
+            } catch {
+                print("🫧 [THINK] Parsing error: \(error)")
+                completion("")
+            }
+        }.resume()
+    }
+
+    // THOUGHT LOOP PHASE: DECIDE
+    func decide(thought: String, context: String, completion: @escaping (String) -> Void) {
+        let url = URL(string: "\(baseURL)/chat/completions")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let systemPrompt = """
+        You are Blob. You just had a thought and now you need to decide what to do or say about it.
+        Be decisive. Know your intention. Speak with intent.
+        """
+
+        let userPrompt = """
+        You just thought: "\(thought)"
+
+        \(context)
+
+        What do you actually want to do or say? What's your intention? One sentence max.
+        """
+
+        let payload: [String: Any] = [
+            "model": "gpt-4o",
+            "max_tokens": 80,
+            "temperature": 0.8,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemPrompt
+                ],
+                [
+                    "role": "user",
+                    "content": userPrompt
+                ]
+            ]
+        ]
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        print("🫧 [DECIDE] Making text call...")
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("🫧 [DECIDE] Error: \(error.localizedDescription)")
+                completion("")
+                return
+            }
+
+            guard let data = data else {
+                print("🫧 [DECIDE] No data returned")
+                completion("")
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let error = json["error"] as? [String: Any] {
+                        print("🫧 [DECIDE] API Error: \(error)")
+                        completion("")
+                        return
+                    }
+
+                    if let choices = json["choices"] as? [[String: Any]],
+                       let firstChoice = choices.first,
+                       let message = firstChoice["message"] as? [String: Any],
+                       let content = message["content"] as? String {
+                        let decision = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                        print("🫧 [DECIDE] \(decision)")
+                        completion(decision)
+                    } else {
+                        print("🫧 [DECIDE] Could not parse response")
+                        completion("")
+                    }
+                }
+            } catch {
+                print("🫧 [DECIDE] Parsing error: \(error)")
+                completion("")
+            }
+        }.resume()
+    }
+
+    // THOUGHT LOOP PHASE: REFLECT
+    func reflect(utterance: String, thought: String, decision: String, completion: @escaping (String) -> Void) {
+        let url = URL(string: "\(baseURL)/chat/completions")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let systemPrompt = """
+        You are Blob, reflecting on something you just said. Be honest about how you feel.
+        Update your internal monologue with what you learned.
+        """
+
+        let userPrompt = """
+        You thought: "\(thought)"
+        You decided: "\(decision)"
+        You said: "\(utterance)"
+
+        How do you feel about that? What did you learn? Update your internal monologue in 1 sentence.
+        """
+
+        let payload: [String: Any] = [
+            "model": "gpt-4o",
+            "max_tokens": 100,
+            "temperature": 0.8,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemPrompt
+                ],
+                [
+                    "role": "user",
+                    "content": userPrompt
+                ]
+            ]
+        ]
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        print("🫧 [REFLECT] Making text call...")
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("🫧 [REFLECT] Error: \(error.localizedDescription)")
+                completion("")
+                return
+            }
+
+            guard let data = data else {
+                print("🫧 [REFLECT] No data returned")
+                completion("")
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let error = json["error"] as? [String: Any] {
+                        print("🫧 [REFLECT] API Error: \(error)")
+                        completion("")
+                        return
+                    }
+
+                    if let choices = json["choices"] as? [[String: Any]],
+                       let firstChoice = choices.first,
+                       let message = firstChoice["message"] as? [String: Any],
+                       let content = message["content"] as? String {
+                        let reflection = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                        print("🫧 [REFLECT] \(reflection)")
+                        completion(reflection)
+                    } else {
+                        print("🫧 [REFLECT] Could not parse response")
+                        completion("")
+                    }
+                }
+            } catch {
+                print("🫧 [REFLECT] Parsing error: \(error)")
+                completion("")
+            }
+        }.resume()
+    }
+
+    // THOUGHT LOOP PHASE: INTENT
+    func detectIntent(context: String, completion: @escaping (String) -> Void) {
+        let url = URL(string: "\(baseURL)/chat/completions")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let systemPrompt = """
+        You are Blob analyzing what the user is trying to accomplish.
+        Be specific and factual. Detect the actual goal, not the tool being used.
+        """
+
+        let userPrompt = """
+        Based on the current screen, active app, and what's being typed, what is the user trying to accomplish?
+        Be concise. One sentence max. Focus on the goal, not the mechanism.
+
+        Context:
+        \(context)
+        """
+
+        let payload: [String: Any] = [
+            "model": "gpt-4o",
+            "max_tokens": 80,
+            "temperature": 0.7,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemPrompt
+                ],
+                [
+                    "role": "user",
+                    "content": userPrompt
+                ]
+            ]
+        ]
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        print("🫧 [INTENT] Detecting user goal...")
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("🫧 [INTENT] Error: \(error.localizedDescription)")
+                completion("")
+                return
+            }
+
+            guard let data = data else {
+                print("🫧 [INTENT] No data returned")
+                completion("")
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let error = json["error"] as? [String: Any] {
+                        print("🫧 [INTENT] API Error: \(error)")
+                        completion("")
+                        return
+                    }
+
+                    if let choices = json["choices"] as? [[String: Any]],
+                       let firstChoice = choices.first,
+                       let message = firstChoice["message"] as? [String: Any],
+                       let content = message["content"] as? String {
+                        let intent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                        print("🫧 [INTENT] \(intent)")
+                        completion(intent)
+                    } else {
+                        print("🫧 [INTENT] Could not parse response")
+                        completion("")
+                    }
+                }
+            } catch {
+                print("🫧 [INTENT] Parsing error: \(error)")
+                completion("")
+            }
+        }.resume()
     }
 }

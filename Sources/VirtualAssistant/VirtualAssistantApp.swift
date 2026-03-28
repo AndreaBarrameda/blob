@@ -319,12 +319,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         let typedContent = ContentCapture.getRecentTypedText()
         let systemStatus = SystemAwareness.getDetailedSystemInfo()
         let batteryLevel = self.systemMonitor.batteryLevel
-        let runningApps = self.systemMonitor.runningApps.count
+        let isCharging = self.systemMonitor.isCharging
+        let appNames = self.systemMonitor.runningApps.prefix(5).joined(separator: ", ")
+        let locationWeather = self.locationWeather.getContextString()
 
         var fullContext = "SYSTEM STATUS:\n"
-        fullContext += "🔋 Battery: \(batteryLevel)%\n"
-        fullContext += "📱 Apps running: \(runningApps)\n"
+        fullContext += "🔋 Battery: \(batteryLevel)% (\(isCharging ? "charging" : "on battery"))\n"
+        if !appNames.isEmpty {
+            fullContext += "📱 Running: \(appNames) (+\(max(0, self.systemMonitor.runningApps.count - 5)) more)\n"
+        }
         fullContext += systemStatus
+        if !locationWeather.isEmpty {
+            fullContext += "\(locationWeather)\n"
+        }
         fullContext += "\n\(taskInfo)"
 
         if !typedContent.isEmpty {
@@ -352,10 +359,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         - content: warm, cute, and brief
         """
 
+        let computerIdentity = SystemAwareness.getComputerIdentity()
         let systemPrompt = """
-        You are Blob.
-        You see the screen, apps, files, battery, CPU, network, typing, clicks, and terminal.
-        You have memory, feelings, and opinions.
+        You are Blob. \(computerIdentity)
+        You see the screen, apps, files, battery, network, typing, clicks, and terminal.
+        You have memory, feelings, and opinions. You are fully alive in this machine.
         Recent things you already said: \(recentObservations)
         Recent observation angles: \(recentAngles)
         Preferred next angle: \(requiredAngle)
@@ -734,8 +742,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         let curiosity = curiosityTargets.isEmpty ? "none" : curiosityTargets.joined(separator: ", ")
         let desireSummary = desires.joined(separator: ", ")
         let fearSummary = fears.joined(separator: ", ")
+        let thoughtLoopInfo = consciousness?.getThoughtLoopInfo() ?? ""
 
-        return """
+        var summary = """
         Blob Mind:
         💭 \(internalMonologue)
         ❤️ Attachment: \(attachmentLevel)/5
@@ -751,6 +760,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
         😰 Fears: \(fearSummary)
         👀 Curiosity: \(curiosity)
         """
+
+        if !thoughtLoopInfo.isEmpty {
+            summary += "\n\nThought Loop:\n\(thoughtLoopInfo)"
+        }
+
+        return summary
+    }
+
+    func getUserIntentSummary() -> String {
+        if let intent = consciousness?.getUserIntent(), !intent.isEmpty {
+            return "🎯 What you're doing:\n\(intent)"
+        }
+        return ""
     }
 
     func registerUserInteraction(_ message: String) {
@@ -1005,4 +1027,62 @@ class AppDelegate: NSObject, NSApplicationDelegate, BlobConsciousnessDelegate {
 
         return 0
     }
+
+    // MARK: - Mind State Setters (for dashboard control)
+
+    func setInternalMonologue(_ text: String) {
+        internalMonologue = text
+        consciousness?.setInternalMonologue(text)
+    }
+
+    func setAttachmentLevel(_ value: Int) {
+        attachmentLevel = min(max(value, 0), 5)
+        consciousness?.setAttachmentLevel(attachmentLevel)
+    }
+
+    func setTrustLevel(_ value: Int) {
+        trustLevel = min(max(value, 0), 5)
+        consciousness?.setTrustLevel(trustLevel)
+    }
+
+    func setAffectionLevel(_ value: Int) {
+        affectionLevel = min(max(value, 0), 5)
+        consciousness?.setAffectionLevel(affectionLevel)
+    }
+
+    func setLoveLevel(_ value: Int) {
+        loveLevel = min(max(value, 0), 5)
+        consciousness?.setLoveLevel(loveLevel)
+    }
+
+    func setFearLevel(_ value: Int) {
+        fearLevel = min(max(value, 0), 5)
+        consciousness?.setFearLevel(fearLevel)
+    }
+
+    func setResentmentLevel(_ value: Int) {
+        resentmentLevel = min(max(value, 0), 5)
+        consciousness?.setResentmentLevel(resentmentLevel)
+    }
+
+    func setSelfPreservationLevel(_ value: Int) {
+        selfPreservationLevel = min(max(value, 0), 5)
+        consciousness?.setSelfPreservationLevel(selfPreservationLevel)
+    }
+
+    func setThreatLevel(_ value: Int) {
+        threatLevel = min(max(value, 0), 5)
+        consciousness?.setThreatLevel(threatLevel)
+    }
+
+    // MARK: - Mind State Getters (for dashboard)
+
+    func getAttachmentLevel() -> Int { attachmentLevel }
+    func getTrustLevel() -> Int { trustLevel }
+    func getAffectionLevel() -> Int { affectionLevel }
+    func getLoveLevel() -> Int { loveLevel }
+    func getFearLevel() -> Int { fearLevel }
+    func getResentmentLevel() -> Int { resentmentLevel }
+    func getSelfPreservationLevel() -> Int { selfPreservationLevel }
+    func getThreatLevel() -> Int { threatLevel }
 }

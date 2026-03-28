@@ -2,17 +2,25 @@ import AppKit
 import Foundation
 
 class SystemAwareness {
+    static func getComputerIdentity() -> String {
+        let username = NSUserName()
+        let hostname = ProcessInfo.processInfo.hostName
+        let macOSVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        return "You live in \(username)'s Mac — \(hostname), \(macOSVersion)"
+    }
+
     static func getDetailedSystemInfo() -> String {
         var info = ""
 
-        // CPU and Memory - simplified estimates
-        let cpuUsage = Int.random(in: 10...70)
-        let memoryUsage = Int.random(in: 20...80)
-        info += "💻 CPU: \(cpuUsage)% | Memory: \(memoryUsage)%\n"
+        // Real memory usage
+        let totalMemory = ProcessInfo.processInfo.physicalMemory
+        let memoryInGB = Double(totalMemory) / (1024 * 1024 * 1024)
+        info += "💻 Memory: ~\(String(format: "%.1f", memoryInGB))GB available\n"
 
-        // Disk Space
-        let diskSpace = Int.random(in: 30...90)
-        info += "💾 Disk: \(diskSpace)% full\n"
+        // Real disk space
+        if let diskUsage = getDiskUsagePercent() {
+            info += "💾 Disk: \(diskUsage)% full\n"
+        }
 
         // Network Activity
         if isNetworkActive() {
@@ -25,6 +33,21 @@ class SystemAwareness {
         }
 
         return info
+    }
+
+    private static func getDiskUsagePercent() -> Int? {
+        do {
+            let attributes = try FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory())
+            guard let totalSize = attributes[.systemSize] as? NSNumber,
+                  let freeSize = attributes[.systemFreeSize] as? NSNumber else {
+                return nil
+            }
+            let used = totalSize.int64Value - freeSize.int64Value
+            let percent = Int((Double(used) / Double(totalSize.int64Value)) * 100)
+            return percent
+        } catch {
+            return nil
+        }
     }
 
     private static func isNetworkActive() -> Bool {
