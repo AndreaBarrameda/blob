@@ -40,6 +40,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     let spotify = SpotifyController()
     let memory = BlobMemory()
     let conversationLog = ConversationLog()
+    lazy var notesFilePath: String = {
+        if let execURL = Bundle.main.executableURL {
+            return execURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("NOTES.md").path
+        }
+        return FileManager.default.currentDirectoryPath + "/NOTES.md"
+    }()
     let elevenLabs = ElevenLabsClient()
     private let audioCapture = AudioCaptureManager()
     let voiceAgent = BlobVoiceAgent()
@@ -91,12 +101,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     private var selfPreservationLevel = 3
     private var relationshipSummary = "Cautiously attached."
     var workModeEnabled: Bool {
-        get {
-            UserDefaults.standard.bool(forKey: "workModeEnabled")
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "workModeEnabled")
-        }
+        get { UserDefaults.standard.bool(forKey: "workModeEnabled") }
+        set { UserDefaults.standard.set(newValue, forKey: "workModeEnabled") }
+    }
+    var currentTaskGoal: String {
+        get { UserDefaults.standard.string(forKey: "currentTaskGoal") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "currentTaskGoal") }
     }
     var listeningModeEnabled: Bool {
         get {
@@ -149,6 +159,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         // Wire shared memory + conversation log to OpenAI client
         openAI.memory = memory
         openAI.conversationLog = conversationLog
+        openAI.notesFilePath = notesFilePath
         audioCapture.delegate = self
         voiceAgent.delegate = self
 
@@ -612,8 +623,92 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     }
 
     func disableWorkMode() {
+        generateSessionSummary()
         self.workModeEnabled = false
         print("💼 Work Mode OFF - persisted")
+    }
+
+    func handleAppNoteTag(_ json: String) -> String {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let title = obj["title"] as? String,
+              let body  = obj["body"]  as? String else {
+            return "couldn't parse note details"
+        }
+        let action = obj["action"] as? String ?? "create"
+        let result = SystemControl.addAppleNote(title: title, body: body, action: action)
+        print("📝 Apple Notes: \(result.message)")
+        return result.message
+    }
+
+    func handleCalendarTag(_ json: String) -> String {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let title = obj["title"] as? String,
+              let start = obj["start"] as? String,
+              let end   = obj["end"]   as? String else {
+            return "couldn't parse calendar event details"
+        }
+        let notes = obj["notes"] as? String ?? ""
+        let result = SystemControl.createCalendarEvent(title: title, startISO: start, endISO: end, notes: notes)
+        print("📅 Calendar: \(result.message)")
+        return result.message
+    }
+
+    func appendNote(_ content: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let timestamp = formatter.string(from: Date())
+        let goal = currentTaskGoal.isEmpty ? "" : " — \(currentTaskGoal)"
+        let entry = "\n## \(timestamp)\(goal)\n\(content)\n\n---\n"
+
+        if !FileManager.default.fileExists(atPath: notesFilePath) {
+            try? "# Blob Notes\n".write(toFile: notesFilePath, atomically: true, encoding: .utf8)
+        }
+        if var existing = try? String(contentsOfFile: notesFilePath, encoding: .utf8) {
+            // Insert after the first line (header)
+            if let range = existing.range(of: "\n") {
+                existing.insert(contentsOf: entry, at: range.upperBound)
+            } else {
+                existing += entry
+            }
+            try? existing.write(toFile: notesFilePath, atomically: true, encoding: .utf8)
+        }
+        print("📝 Note saved to NOTES.md")
+    }
+
+    private func generateSessionSummary() {
+        let recentConversation = conversationLog.getRecentContext(limit: 30)
+        guard !recentConversation.isEmpty else { return }
+
+        let goal = currentTaskGoal.isEmpty ? "no specific goal set" : currentTaskGoal
+        let prompt = """
+        The user just ended a work session. Based on the conversation below, write a concise session summary as bullet points.
+        Focus on: what was worked on, decisions made, problems solved, things left to do.
+        Keep it factual and brief. 3-6 bullets max. No preamble.
+
+        Task goal: \(goal)
+
+        \(recentConversation)
+        """
+
+        let payload: [String: Any] = [
+            "model": "gpt-5.4-mini",
+            "messages": [
+                ["role": "system", "content": "You summarize work sessions into concise bullet point notes."],
+                ["role": "user", "content": prompt]
+            ],
+            "max_completion_tokens": 400,
+            "temperature": 0.3
+        ]
+
+        openAI.rawRequest(payload: payload) { [weak self] result in
+            guard let self = self, case .success(let content) = result, !content.isEmpty else { return }
+            self.appendNote(content)
+            DispatchQueue.main.async {
+                self.showSpeechBubble(text: "session noted.", mood: .content)
+            }
+        }
     }
 
     func enableListeningMode() {
@@ -641,6 +736,86 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     func voiceAgentUserSaid(_ text: String) {
         guard !text.isEmpty else { return }
         registerUserInteraction(text)
+
+        // In work mode, route through command pipeline so Blob can run commands and save notes
+        guard workModeEnabled else { return }
+        let taskContext = getTaskContext()
+        let contextInfo = getContextInfo()
+        let fullContext = [contextInfo, taskContext].filter { !$0.isEmpty }.joined(separator: "\n\n")
+
+        openAI.chat(message: text, contextInfo: fullContext, workMode: true) { [weak self] response, mood in
+            guard let self = self else { return }
+            self.executeWorkModeActions(from: response, mood: mood, userMessage: text)
+        }
+    }
+
+    private func executeWorkModeActions(from response: String, mood: BlobMood, userMessage: String) {
+        let runPattern      = #"\[run:\s*(.+?)\]"#
+        let notePattern     = #"\[note:\s*([\s\S]+?)\]"#
+        let calendarPattern = #"\[calendar:\s*(\{[\s\S]+?\})\]"#
+        let appNotePattern  = #"\[appnote:\s*(\{[\s\S]+?\})\]"#
+        var cleaned = response
+
+        // Execute [run: ...] commands
+        if let runRegex = try? NSRegularExpression(pattern: runPattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            let matches = runRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+            for match in matches {
+                let command = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                print("💼 [work mode] Running: \(command)")
+                DispatchQueue.global().async { [weak self] in
+                    let result = SystemControl.executeCommand(command)
+                    let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    print("💼 [work mode] Output: \(output.prefix(200))")
+                    // Feed output back so Blob can react to it
+                    if !output.isEmpty, let self = self {
+                        let followUp = "Command output:\n\(String(output.prefix(800)))"
+                        self.openAI.chat(message: followUp, contextInfo: "", workMode: true) { response, mood in
+                            let parsed = self.openAI.parseMoodTag(from: response)
+                            DispatchQueue.main.async {
+                                self.showSpeechBubble(text: parsed.text, mood: parsed.mood)
+                            }
+                        }
+                    }
+                }
+            }
+            cleaned = runRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Save [note: ...] entries
+        if let noteRegex = try? NSRegularExpression(pattern: notePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+            let ns = cleaned as NSString
+            let matches = noteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+            for match in matches {
+                let content = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                appendNote(content)
+            }
+            cleaned = noteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Create [calendar: {...}] events
+        if let calRegex = try? NSRegularExpression(pattern: calendarPattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+            let ns = cleaned as NSString
+            let matches = calRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+            for match in matches {
+                let json = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                _ = handleCalendarTag(json)
+            }
+            cleaned = calRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Create [appnote: {...}] Apple Notes
+        if let appNoteRegex = try? NSRegularExpression(pattern: appNotePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+            let ns = cleaned as NSString
+            let matches = appNoteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+            for match in matches {
+                let json = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                _ = handleAppNoteTag(json)
+            }
+            cleaned = appNoteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        conversationLog.logChat(userMessage: userMessage, blobResponse: cleaned, mood: mood.rawValue)
     }
 
     func voiceAgentStateChanged(_ state: String) {
@@ -765,7 +940,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
 
     func getTaskContext() -> String {
         if workModeEnabled {
-            return taskContext.getTaskContext()
+            var context = taskContext.getTaskContext()
+            if !currentTaskGoal.isEmpty {
+                context = "CURRENT TASK GOAL: \(currentTaskGoal)\n\n" + context
+            }
+            context += "\nPROJECT PATH: \(notesFilePath.replacingOccurrences(of: "/NOTES.md", with: ""))"
+            return context
         }
         return ""
     }

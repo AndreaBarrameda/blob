@@ -18,6 +18,7 @@ struct DashboardView: View {
     @State private var voiceEnabled = true
     @State private var contextInfo = ""
     @State private var taskInfo = ""
+    @State private var taskGoal = ""
     @State private var mindStateInfo = ""
     @State private var showSystemControl = false
     @State private var chatTimeoutTimer: Timer?
@@ -324,13 +325,39 @@ struct DashboardView: View {
             }
             .border(Color.gray.opacity(0.3), width: 0.5)
 
-            // Task Info Display (when Work Mode is on)
-            if workMode && !taskInfo.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(taskInfo.split(separator: "\n").map(String.init), id: \.self) { line in
-                        Text(line)
+            // Work Mode task goal + info
+            if workMode {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        TextField("what are you working on?", text: $taskGoal)
+                            .font(.caption)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .onSubmit {
+                                AppDelegate.shared?.currentTaskGoal = taskGoal
+                            }
+                            .onChange(of: taskGoal) { _ in
+                                AppDelegate.shared?.currentTaskGoal = taskGoal
+                            }
+                        if !taskGoal.isEmpty {
+                            Button("clear") {
+                                taskGoal = ""
+                                AppDelegate.shared?.currentTaskGoal = ""
+                            }
                             .font(.caption2)
-                            .foregroundColor(.black)
+                            .foregroundColor(.gray)
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(8)
+                    .background(Color.white.opacity(0.6))
+                    .cornerRadius(6)
+
+                    if !taskInfo.isEmpty {
+                        ForEach(taskInfo.split(separator: "\n").map(String.init), id: \.self) { line in
+                            Text(line)
+                                .font(.caption2)
+                                .foregroundColor(.black)
+                        }
                     }
                 }
                 .padding(10)
@@ -582,6 +609,9 @@ struct DashboardView: View {
             refreshMindState()
             publishDashboardState()
 
+            // Initialize task goal from AppDelegate
+            taskGoal = AppDelegate.shared?.currentTaskGoal ?? ""
+
             // Initialize toggles from AppDelegate
             if let appDelegate = AppDelegate.shared {
                 print("📋 AppDelegate connected — syncing toggles")
@@ -754,10 +784,104 @@ struct DashboardView: View {
             }
         }
 
+        // Wrap completion to intercept [run: ...], [note: ...], [calendar: ...], [appnote: ...] tags in work mode
+        let runPattern      = #"\[run:\s*(.+?)\]"#
+        let notePattern     = #"\[note:\s*([\s\S]+?)\]"#
+        let calendarPattern = #"\[calendar:\s*(\{[\s\S]+?\})\]"#
+        let appNotePattern  = #"\[appnote:\s*(\{[\s\S]+?\})\]"#
+        let wrappedCompletion: (String, BlobMood) -> Void = { response, mood in
+            guard workMode else {
+                completion(response, mood)
+                return
+            }
+
+            var cleaned = response
+            var didHandle = false
+
+            // Handle [run: <command>] tags
+            if let runRegex = try? NSRegularExpression(pattern: runPattern, options: .caseInsensitive) {
+                let ns = cleaned as NSString
+                let matches = runRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                if !matches.isEmpty {
+                    didHandle = true
+                    for match in matches {
+                        let command = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        DispatchQueue.main.async {
+                            messages.append(ChatMessage(text: "$ \(command)", isUser: false))
+                        }
+                        DispatchQueue.global().async {
+                            let result = SystemControl.executeCommand(command)
+                            let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let display = output.isEmpty ? "(no output)" : String(output.prefix(1500))
+                            DispatchQueue.main.async {
+                                messages.append(ChatMessage(text: display, isUser: false))
+                                publishDashboardState()
+                            }
+                        }
+                    }
+                    cleaned = runRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+
+            // Handle [note: <content>] tags
+            if let noteRegex = try? NSRegularExpression(pattern: notePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let ns = cleaned as NSString
+                let matches = noteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                if !matches.isEmpty {
+                    didHandle = true
+                    for match in matches {
+                        let noteContent = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        AppDelegate.shared?.appendNote(noteContent)
+                    }
+                    cleaned = noteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+
+            // Handle [calendar: {...}] tags
+            if let calRegex = try? NSRegularExpression(pattern: calendarPattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let ns = cleaned as NSString
+                let matches = calRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                if !matches.isEmpty {
+                    didHandle = true
+                    for match in matches {
+                        let json = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        let msg = AppDelegate.shared?.handleCalendarTag(json) ?? "calendar error"
+                        DispatchQueue.main.async {
+                            messages.append(ChatMessage(text: "📅 \(msg)", isUser: false))
+                        }
+                    }
+                    cleaned = calRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+
+            // Handle [appnote: {...}] Apple Notes
+            if let appNoteRegex = try? NSRegularExpression(pattern: appNotePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let ns = cleaned as NSString
+                let matches = appNoteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                if !matches.isEmpty {
+                    didHandle = true
+                    for match in matches {
+                        let json = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        let msg = AppDelegate.shared?.handleAppNoteTag(json) ?? "notes error"
+                        DispatchQueue.main.async {
+                            messages.append(ChatMessage(text: "📝 \(msg)", isUser: false))
+                        }
+                    }
+                    cleaned = appNoteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+
+            // Show the cleaned response (without tags)
+            let finalResponse = cleaned.isEmpty && didHandle ? "done." : cleaned
+            if !finalResponse.isEmpty {
+                completion(finalResponse, mood)
+            }
+        }
+
         if screenWatchEnabled {
-            openAI.chatWithScreenAwareness(message: userMessage, audioContext: audioContext, contextInfo: fullContext, completion: completion)
+            openAI.chatWithScreenAwareness(message: userMessage, audioContext: audioContext, contextInfo: fullContext, workMode: workMode, completion: wrappedCompletion)
         } else {
-            openAI.chat(message: userMessage, audioContext: audioContext, contextInfo: fullContext, completion: completion)
+            openAI.chat(message: userMessage, audioContext: audioContext, contextInfo: fullContext, workMode: workMode, completion: wrappedCompletion)
         }
     }
 

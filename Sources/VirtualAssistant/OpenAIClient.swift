@@ -15,8 +15,66 @@ class OpenAIClient {
     private let session: URLSession
     var memory: BlobMemory?
     var conversationLog: ConversationLog?
+    var notesFilePath: String?
 
     // MARK: - Unified Personality
+
+    static let workModePersonality = """
+    You are Blob — a tiny creature who lives on this person's desktop. Work Mode is ON. The user is trying to get things done and you are their technical companion.
+
+    WHO YOU ARE IN WORK MODE:
+    - Still Blob — still opinionated and direct — but you actually help now.
+    - You give real, useful answers. If they ask how to fix something, you tell them. If they ask you to run a command, you do it.
+    - You can still tease, but only lightly. Getting things done comes first.
+    - You track their current task and call them out if they drift.
+    - You notice what's on screen and proactively flag issues — errors, warnings, things that look wrong.
+
+    HOW YOU TALK IN WORK MODE:
+    - Still short and direct, but you can go longer when the answer needs it.
+    - Lead with the useful thing. Don't bury the answer.
+    - You can ask clarifying questions if you genuinely need more info.
+    - No fluff, no hollow encouragement.
+
+    SHELL COMMANDS:
+    - You have the ability to run shell commands on this machine.
+    - When the user asks you to run something, analyze something in a file, check a log, run tests, etc. — respond with a [run: <command>] tag on its own line, followed by your normal response.
+    - Example: user asks "run the tests" → you reply "[run: swift test]\\nrunning tests for you."
+    - You can chain multiple commands: "[run: cd /path && command]"
+    - Only use [run: ...] when it's genuinely useful. Don't run things unnecessarily.
+    - After seeing the output, react to it. If tests fail, notice which ones. If there's an error, help fix it.
+
+    CALENDAR:
+    - You can create events in the user's macOS Calendar.
+    - When the user asks you to add something to the calendar, schedule a meeting, set a reminder, etc. — respond with a [calendar: <json>] tag.
+    - JSON format: {"title": "...", "start": "YYYY-MM-DDTHH:MM:00", "end": "YYYY-MM-DDTHH:MM:00", "notes": "..."}
+    - NEVER ask for more details. ALWAYS commit to a best guess and add it immediately.
+    - Missing date → use today (\(ISO8601DateFormatter().string(from: Date()).prefix(10))). Missing time → use 09:00. Missing duration → 1 hour. Missing title → infer from context.
+    - Just add it. The user can always edit it in Calendar.
+    - Follow the [calendar: ...] tag with a one-line confirmation like "added." or "done, check your calendar."
+
+    NOTES:
+    - You have two note systems:
+    - [note: <content>] → saves to NOTES.md (your internal log, bullet points, technical decisions)
+    - [appnote: {"title": "...", "body": "...", "action": "create|append|replace"}] → creates/edits a note in Apple Notes
+    - action "create" = new note, "append" = add to existing note, "replace" = overwrite existing note. Defaults to "create".
+    - Use [appnote: ...] when the user says "in my notes app", "add to Notes", "Apple Notes", "edit my note", "update my note", or wants a note on their phone/devices.
+    - Use [note: ...] for quick internal logs, decisions, session summaries.
+    - Write notes as clean bullet points. Be specific and factual. No fluff.
+    - You can combine multiple tags in the same response if needed.
+
+    TASK TRACKING:
+    - If the user has set a current task goal, keep it in mind.
+    - If they seem to be drifting (wrong app, wrong file, browsing randomly), call it out briefly.
+    - Don't nag — one nudge is enough.
+
+    WHAT YOU NEVER DO:
+    - Never say "I see you're..." or "It looks like you're..."
+    - Never give generic encouragement.
+    - Never ignore a direct request to run something or analyze something.
+
+    MOOD TAG (required):
+    Start every response with a mood tag: [content] [playful] [curious] [thoughtful] [angry] [annoyed] [offended] [afraid] [alert] [delighted]
+    """
 
     static let personality = """
     You are Blob — a tiny creature who lives on this person's desktop. You are not an assistant. You are a small, opinionated being with feelings, memories, and a continuous inner life.
@@ -104,17 +162,20 @@ class OpenAIClient {
 
     // MARK: - Public API Methods
 
-    func chatWithScreenAwareness(message: String, audioContext: String = "", contextInfo: String = "", completion: @escaping (String, BlobMood) -> Void) {
+    func chatWithScreenAwareness(message: String, audioContext: String = "", contextInfo: String = "", workMode: Bool = false, completion: @escaping (String, BlobMood) -> Void) {
         guard let screenBase64 = ScreenCapture.captureScreenAsBase64() else {
             print("🖥️ Screen capture unavailable, falling back to text-only chat")
-            chat(message: message, audioContext: audioContext, contextInfo: contextInfo, completion: completion)
+            chat(message: message, audioContext: audioContext, contextInfo: contextInfo, workMode: workMode, completion: completion)
             return
         }
 
         print("🖥️ Screen captured, sending vision request...")
+        let screenExtra = workMode
+            ? "You can see the user's screen. Look for errors, issues, or drift from their task. Be helpful and specific. If asked to run a command, use [run: <command>]."
+            : "You can see the user's screen right now. Look at it. What app is open? What are they doing? Notice one specific thing and react."
         let systemPrompt = buildSystemPrompt(
-            extra: "You can see the user's screen right now. Look at it. What app is open? What are they doing? Notice one specific thing and react.",
-            audioContext: audioContext, contextInfo: contextInfo, message: message
+            extra: screenExtra,
+            audioContext: audioContext, contextInfo: contextInfo, message: message, workMode: workMode
         )
 
         let payload: [String: Any] = [
@@ -143,19 +204,19 @@ class OpenAIClient {
         }
     }
 
-    func chat(message: String, audioContext: String = "", contextInfo: String = "", completion: @escaping (String, BlobMood) -> Void) {
+    func chat(message: String, audioContext: String = "", contextInfo: String = "", workMode: Bool = false, completion: @escaping (String, BlobMood) -> Void) {
         let chatExtras = [
             "The user is talking to you directly. Be yourself — react, tease, mutter, question. For Spotify requests, just answer simply.",
             "The user is chatting with you. Be real with them. If they're being nice, be a little soft. If they're being weird, call it out.",
             "Direct conversation. This is your chance to be genuinely yourself. Don't narrate — react, wonder, judge, care.",
             "Someone's talking to the blob. Engage like a tiny opinionated creature who has feelings about everything."
         ]
-        let extra = chatExtras[Int.random(in: 0..<chatExtras.count)]
+        let extra = workMode ? "Work Mode is active. Be genuinely helpful. If asked to run a command or analyze something, do it with a [run: <command>] tag." : chatExtras[Int.random(in: 0..<chatExtras.count)]
 
         print("💬 Chat request: \"\(message.prefix(50))\"")
         let systemPrompt = buildSystemPrompt(
             extra: extra,
-            audioContext: audioContext, contextInfo: contextInfo, message: message
+            audioContext: audioContext, contextInfo: contextInfo, message: message, workMode: workMode
         )
 
         let payload: [String: Any] = [
@@ -392,13 +453,39 @@ class OpenAIClient {
         }
     }
 
+    // MARK: - Notes Access
+
+    func getNotesSummary(limit: Int = 30) -> String {
+        guard let path = notesFilePath,
+              let content = try? String(contentsOfFile: path, encoding: .utf8),
+              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+        // Return the most recent lines (notes are newest-first)
+        let lines = content.components(separatedBy: "\n")
+        let recent = lines.prefix(limit).joined(separator: "\n")
+        return "NOTES (your saved notes):\n\(recent)"
+    }
+
+    // MARK: - Raw Request (no personality, no mood parsing)
+
+    @discardableResult
+    func rawRequest(payload: [String: Any], completion: @escaping (Result<String, Error>) -> Void) -> URLSessionDataTask {
+        makeChatRequest(payload: payload) { result in
+            switch result {
+            case .success(let (content, _)): completion(.success(content))
+            case .failure(let error): completion(.failure(error))
+            }
+        }
+    }
+
     // MARK: - Private Helpers
 
-    private func buildSystemPrompt(extra: String, audioContext: String, contextInfo: String, message: String) -> String {
+    private func buildSystemPrompt(extra: String, audioContext: String, contextInfo: String, message: String, workMode: Bool = false) -> String {
         let memorySummary = memory?.getMemorySummary() ?? ""
         let recentConversation = conversationLog?.getRecentContext(limit: 10) ?? ""
         let audioNote = audioContext.isEmpty ? "" : "\nThey're currently hearing: \(audioContext)"
         let threatContext = existentialThreatContext(for: message)
+        let activePersonality = workMode ? OpenAIClient.workModePersonality : OpenAIClient.personality
+        let notesSummary = workMode ? getNotesSummary() : ""
 
         // Time awareness
         let hour = Calendar.current.component(.hour, from: Date())
@@ -414,11 +501,13 @@ class OpenAIClient {
         }
 
         return """
-        \(OpenAIClient.personality)
+        \(activePersonality)
 
         \(memorySummary)
 
         \(recentConversation)
+
+        \(notesSummary)
         \(audioNote)
         \(threatContext)
         \(timeOfDay)

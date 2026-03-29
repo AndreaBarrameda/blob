@@ -3,15 +3,31 @@ import AppKit
 
 class SpotifyWebAPI {
     func searchAndPlay(query: String) {
-        // Open Spotify search - user can click play from there
-        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            return
-        }
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "spotify:search:\(encodedQuery)") else { return }
 
-        let spotifySearchURI = "spotify:search:\(encodedQuery)"
+        NSWorkspace.shared.open(url)
 
-        if let url = URL(string: spotifySearchURI) {
-            NSWorkspace.shared.open(url)
+        // Give Spotify time to load the search results, then trigger play on the first result
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
+            self.runAppleScript("""
+            tell application "Spotify" to activate
+            delay 0.3
+            tell application "System Events"
+                tell process "Spotify"
+                    key code 36
+                end tell
+            end tell
+            """)
         }
+    }
+
+    private func runAppleScript(_ script: String) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", script]
+        task.standardError = Pipe()
+        try? task.run()
+        task.waitUntilExit()
     }
 }
