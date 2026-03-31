@@ -170,7 +170,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         // Wire shared memory + conversation log to OpenAI client
         openAI.memory = memory
         openAI.conversationLog = conversationLog
-        openAI.codexBridge = codexBridge
         openAI.notesFilePath = notesFilePath
         audioCapture.delegate = self
         voiceAgent.delegate = self
@@ -1601,7 +1600,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         case .angry, .annoyed, .offended:
             resentmentLevel = min(resentmentLevel + 1, 5)
             trustLevel = max(trustLevel - 1, 0)
-        case .love:
+        case .delighted:
             loveLevel = min(loveLevel + 2, 5)
             affectionLevel = min(affectionLevel + 2, 5)
             attachmentLevel = min(attachmentLevel + 1, 5)

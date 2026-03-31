@@ -63,6 +63,10 @@ class SystemAwareness {
         return Int((Double(used) / Double(totalMemory)) * 100)
     }
 
+    static func getDiskUsagePercent() -> Int {
+        return getDiskUsage()
+    }
+
     private static func getDiskUsage() -> Int {
         guard let attrs = try? FileManager.default.attributesOfFileSystem(
             forPath: NSHomeDirectory()

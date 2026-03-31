@@ -16,6 +16,7 @@ class OpenAIClient {
     var memory: BlobMemory?
     var conversationLog: ConversationLog?
     var notesFilePath: String?
+    var lastThinking: String?
 
     // MARK: - Unified Personality
 
@@ -200,6 +201,33 @@ class OpenAIClient {
                 completion(parsed.text, parsed.mood)
             case .failure:
                 completion("I'm having trouble seeing right now...", .content)
+            }
+        }
+    }
+
+    func chatWithImage(image base64: String, message: String, completion: @escaping (String, BlobMood) -> Void) {
+        let systemPrompt = buildSystemPrompt(extra: "You have been given a camera image of the user.", audioContext: "", contextInfo: "", message: message, workMode: false)
+        let payload: [String: Any] = [
+            "model": "gpt-5.4-mini",
+            "max_completion_tokens": 300,
+            "temperature": 0.9,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": [
+                    ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(base64)"]],
+                    ["type": "text", "text": message]
+                ]]
+            ]
+        ]
+        makeChatRequest(payload: payload) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let (content, finishReason)):
+                let sanitized = self.sanitizeUtterance(content, finishReason: finishReason)
+                let parsed = self.parseMoodTag(from: sanitized)
+                completion(parsed.text, parsed.mood)
+            case .failure:
+                completion("Can't see you right now...", .content)
             }
         }
     }

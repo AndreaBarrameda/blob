@@ -206,6 +206,34 @@ class SystemControl {
         }
     }
 
+    // MARK: - Volume / Brightness
+
+    static func setVolume(_ level: Int) {
+        let clamped = max(0, min(100, level))
+        let script = "set volume output volume \(clamped)"
+        runAppleScript(script)
+    }
+
+    static func setBrightness(_ level: Int) {
+        let clamped = max(0, min(100, level))
+        let fraction = Double(clamped) / 100.0
+        let script = "tell application \"System Events\" to set brightness of display 1 to \(fraction)"
+        runAppleScript(script)
+    }
+
+    @discardableResult
+    private static func runAppleScript(_ source: String) -> String {
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", source]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+        try? task.run()
+        task.waitUntilExit()
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
     private static func parseISO(_ iso: String) -> Date? {
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime]
