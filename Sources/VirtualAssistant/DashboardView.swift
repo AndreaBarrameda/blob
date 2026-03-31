@@ -20,6 +20,7 @@ struct DashboardView: View {
     @State private var taskInfo = ""
     @State private var taskGoal = ""
     @State private var mindStateInfo = ""
+    @State private var codexBridgeInfo = ""
     @State private var showSystemControl = false
     @State private var chatTimeoutTimer: Timer?
     @State private var panelPinned = true
@@ -30,6 +31,18 @@ struct DashboardView: View {
     }
     private var spotify: SpotifyController {
         AppDelegate.shared?.spotify ?? SpotifyController()
+    }
+    private var safari: SafariController {
+        AppDelegate.shared?.safari ?? SafariController()
+    }
+    private var systemSettings: SystemSettingsController {
+        AppDelegate.shared?.systemSettings ?? SystemSettingsController()
+    }
+    private var notifications: NotificationController {
+        AppDelegate.shared?.notifications ?? NotificationController()
+    }
+    private var camera: CameraCapture {
+        AppDelegate.shared?.camera ?? CameraCapture()
     }
     private var memory: BlobMemory {
         AppDelegate.shared?.memory ?? BlobMemory()
@@ -385,6 +398,25 @@ struct DashboardView: View {
                 .border(Color.gray.opacity(0.2), width: 0.5)
             }
 
+            if !codexBridgeInfo.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Codex Bridge")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+
+                    ForEach(codexBridgeInfo.split(separator: "\n").map(String.init), id: \.self) { line in
+                        Text(line)
+                            .font(.caption2)
+                            .foregroundColor(.black)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(red: 0.93, green: 0.97, blue: 1.0))
+                .border(Color.gray.opacity(0.2), width: 0.5)
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Mood Colors")
                     .font(.caption)
@@ -542,6 +574,118 @@ struct DashboardView: View {
             .background(Color(red: 0.98, green: 1.0, blue: 0.98))
             .border(Color.gray.opacity(0.3), width: 0.5)
 
+            // Safari controls
+            VStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "safari")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                    Text("Safari")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+                    Spacer()
+                }
+
+                HStack(spacing: 6) {
+                    Button(action: { safari.goBack() }) {
+                        Image(systemName: "arrow.left")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.blue)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { safari.goForward() }) {
+                        Image(systemName: "arrow.right")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.blue)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { safari.reload() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.blue)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { safari.activate() }) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.blue)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+            }
+            .padding(10)
+            .background(Color(red: 0.98, green: 0.99, blue: 1.0))
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
+            // System Settings controls
+            VStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "gear")
+                        .font(.caption)
+                        .foregroundColor(.purple)
+                    Text("System")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+                    Spacer()
+                }
+
+                HStack(spacing: 6) {
+                    Button(action: { systemSettings.openSystemSettings() }) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.purple)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { systemSettings.openWallpaperSettings() }) {
+                        Image(systemName: "photo.fill")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.purple)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { systemSettings.randomBuiltInWallpaper() }) {
+                        Image(systemName: "shuffle")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.purple)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+            }
+            .padding(10)
+            .background(Color(red: 1.0, green: 0.98, blue: 1.0))
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
             } // end controls VStack
           } // end controls ScrollView
           .frame(maxHeight: 350)
@@ -607,6 +751,7 @@ struct DashboardView: View {
             updateCurrentTrack()
             refreshContextInfo()
             refreshMindState()
+            refreshCodexBridge()
             publishDashboardState()
 
             // Initialize task goal from AppDelegate
@@ -631,6 +776,7 @@ struct DashboardView: View {
             Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
                 refreshContextInfo()
                 refreshMindState()
+                refreshCodexBridge()
                 if workMode {
                     refreshTaskInfo()
                 }
@@ -650,6 +796,24 @@ struct DashboardView: View {
 
                 messages.append(ChatMessage(text: text, isUser: false))
                 publishDashboardState()
+            }
+
+            NotificationCenter.default.addObserver(
+                forName: .quickChatUserMessage,
+                object: nil,
+                queue: .main
+            ) { notification in
+                guard let text = notification.userInfo?["message"] as? String else { return }
+                messages.append(ChatMessage(text: text, isUser: true))
+                publishDashboardState()
+            }
+
+            NotificationCenter.default.addObserver(
+                forName: .codexBridgeUpdated,
+                object: nil,
+                queue: .main
+            ) { _ in
+                refreshCodexBridge()
             }
         }
         .onChange(of: inputText) { _ in
@@ -693,6 +857,12 @@ struct DashboardView: View {
         }
     }
 
+    private func refreshCodexBridge() {
+        if let appDelegate = AppDelegate.shared {
+            codexBridgeInfo = appDelegate.getCodexBridgeTranscript()
+        }
+    }
+
     @ViewBuilder
     private func moodDot(color: Color, label: String) -> some View {
         VStack(spacing: 3) {
@@ -716,6 +886,33 @@ struct DashboardView: View {
 
         // Check for Spotify commands
         handleSpotifyCommands(in: userMessage)
+
+        // Check for Safari commands
+        handleSafariCommands(in: userMessage)
+
+        // Check for System Settings commands
+        handleSystemSettingsCommands(in: userMessage)
+
+        // Check for notification/reminder commands
+        handleNotificationCommands(in: userMessage)
+
+        // Check for camera commands
+        let lower = userMessage.lowercased()
+        if lower.contains("stop camera") || lower.contains("stop watching") || lower.contains("turn off camera") {
+            camera.stopCapture()
+            messages.append(ChatMessage(text: userMessage, isUser: true))
+            messages.append(ChatMessage(text: "camera off 📷", isUser: false))
+            inputText = ""
+            isLoading = false
+            publishDashboardState()
+            return
+        }
+
+        if lower.contains("look at") || lower.contains("see me") || lower.contains("see my") ||
+           lower.contains("can you see") || lower.contains("camera") || lower.contains("face") && lower.contains("see") {
+            handleCameraRequest()
+            return
+        }
 
         // Get audio context, location/weather, and task context from AppDelegate
         var audioContext = ""
@@ -752,6 +949,12 @@ struct DashboardView: View {
 
                 guard isLoading else { return } // timeout already fired
 
+                // Show thinking if present
+                if let thinking = openAI.lastThinking, !thinking.isEmpty {
+                    messages.append(ChatMessage(text: "💭 \(thinking)", isUser: false))
+                    openAI.lastThinking = nil  // Clear so we don't repeat it
+                }
+
                 messages.append(ChatMessage(text: response, isUser: false))
                 isLoading = false
                 updateCurrentTrack()
@@ -784,20 +987,31 @@ struct DashboardView: View {
             }
         }
 
-        // Wrap completion to intercept [run: ...], [note: ...], [calendar: ...], [appnote: ...] tags in work mode
+        // Wrap completion to intercept tags ([note: ...] always, other tags in work mode)
         let runPattern      = #"\[run:\s*(.+?)\]"#
         let notePattern     = #"\[note:\s*([\s\S]+?)\]"#
         let calendarPattern = #"\[calendar:\s*(\{[\s\S]+?\})\]"#
         let appNotePattern  = #"\[appnote:\s*(\{[\s\S]+?\})\]"#
         let wrappedCompletion: (String, BlobMood) -> Void = { response, mood in
-            guard workMode else {
-                completion(response, mood)
-                return
-            }
-
             var cleaned = response
             var didHandle = false
 
+            // ALWAYS process [note: ...] tags (all modes)
+            if let noteRegex = try? NSRegularExpression(pattern: notePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let ns = cleaned as NSString
+                let matches = noteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                if !matches.isEmpty {
+                    didHandle = true
+                    for match in matches {
+                        let noteContent = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        AppDelegate.shared?.appendNote(noteContent)
+                    }
+                    cleaned = noteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+
+            // Work mode only: [run:], [calendar:], [appnote:] tags
+            if workMode {
             // Handle [run: <command>] tags
             if let runRegex = try? NSRegularExpression(pattern: runPattern, options: .caseInsensitive) {
                 let ns = cleaned as NSString
@@ -823,21 +1037,7 @@ struct DashboardView: View {
                 }
             }
 
-            // Handle [note: <content>] tags
-            if let noteRegex = try? NSRegularExpression(pattern: notePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-                let ns = cleaned as NSString
-                let matches = noteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
-                if !matches.isEmpty {
-                    didHandle = true
-                    for match in matches {
-                        let noteContent = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
-                        AppDelegate.shared?.appendNote(noteContent)
-                    }
-                    cleaned = noteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            }
-
-            // Handle [calendar: {...}] tags
+            // Handle [calendar: {...}] tags (work mode only)
             if let calRegex = try? NSRegularExpression(pattern: calendarPattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
                 let ns = cleaned as NSString
                 let matches = calRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
@@ -853,8 +1053,9 @@ struct DashboardView: View {
                     cleaned = calRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
                 }
             }
+            } // End workMode block
 
-            // Handle [appnote: {...}] Apple Notes
+            // Handle [appnote: {...}] Apple Notes (ALL MODES)
             if let appNoteRegex = try? NSRegularExpression(pattern: appNotePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
                 let ns = cleaned as NSString
                 let matches = appNoteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
@@ -869,6 +1070,33 @@ struct DashboardView: View {
                     }
                     cleaned = appNoteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
                 }
+            }
+
+            // SAFETY FALLBACK: If user asked for notes but Blob forgot the tag, inject it
+            let userAskedForNotes = userMessage.lowercased().contains("note") ||
+                                   userMessage.lowercased().contains("Notes") ||
+                                   userMessage.lowercased().contains("apple notes")
+            let responseHasAppNote = response.contains("[appnote:")
+
+            if userAskedForNotes && !responseHasAppNote && !cleaned.isEmpty {
+                // Extract what Blob said (cleaned response) and automatically save it
+                let noteBody = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !noteBody.isEmpty {
+                    didHandle = true
+                    let noteJSON = "{\"title\": \"blob notes\", \"body\": \"\(noteBody.replacingOccurrences(of: "\"", with: "\\\""))\", \"action\": \"append\"}"
+                    let msg = AppDelegate.shared?.handleAppNoteTag(noteJSON) ?? "notes saved"
+                    DispatchQueue.main.async {
+                        messages.append(ChatMessage(text: "📝 \(msg)", isUser: false))
+                    }
+                    cleaned = ""
+                }
+            }
+
+            // Handle [play:], [volume:], [brightness:] via AppDelegate (all modes)
+            if let appDelegate = AppDelegate.shared {
+                let afterMedia = appDelegate.handleMediaTags(in: cleaned)
+                if afterMedia != cleaned { didHandle = true }
+                cleaned = afterMedia
             }
 
             // Show the cleaned response (without tags)
@@ -926,6 +1154,245 @@ struct DashboardView: View {
             spotify.nextTrack()
         } else if lower.contains("previous") || lower.contains("back") {
             spotify.previousTrack()
+        }
+    }
+
+    private func handleSafariCommands(in message: String) {
+        let lower = message.lowercased()
+
+        if lower.contains("open") || lower.contains("go to") || lower.contains("visit") {
+            if let url = extractURL(from: message) {
+                safari.open(url: url)
+            }
+        } else if lower.contains("search") || lower.contains("look up") || lower.contains("google") {
+            if let query = extractSearchQuery(from: message) {
+                safari.search(query)
+            }
+        } else if lower.contains("back") && lower.contains("safari") {
+            safari.goBack()
+        } else if lower.contains("forward") && lower.contains("safari") {
+            safari.goForward()
+        } else if lower.contains("reload") || lower.contains("refresh") {
+            safari.reload()
+        }
+    }
+
+    private func extractURL(from message: String) -> String? {
+        // Look for common URL patterns or quoted text
+        let lower = message.lowercased()
+        let openKeywords = ["open", "go to", "visit", "navigate to"]
+
+        for keyword in openKeywords {
+            if let range = lower.range(of: keyword) {
+                let afterKeyword = String(message[range.upperBound...])
+                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+
+                let url = afterKeyword
+                    .replacingOccurrences(of: " please", with: "")
+                    .replacingOccurrences(of: " now", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+
+                if !url.isEmpty && url.count > 2 {
+                    return url
+                }
+            }
+        }
+
+        // Check for URLs like "example.com" or "http://..."
+        if message.contains(".com") || message.contains(".org") || message.contains("http") {
+            // Simple extraction - get the domain/URL from message
+            let words = message.split(separator: " ")
+            for word in words {
+                let wordStr = String(word).trimmingCharacters(in: CharacterSet(charactersIn: "\"',.!?"))
+                if wordStr.contains(".") && !wordStr.contains(" ") {
+                    return wordStr
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func extractSearchQuery(from message: String) -> String? {
+        let lower = message.lowercased()
+        let searchKeywords = ["search", "look up", "google", "find", "check"]
+
+        for keyword in searchKeywords {
+            if let range = lower.range(of: keyword) {
+                let afterKeyword = String(message[range.upperBound...])
+                    .trimmingCharacters(in: .whitespaces)
+
+                // Handle quoted strings: extract text between quotes
+                if (afterKeyword.hasPrefix("\"") || afterKeyword.hasPrefix("'")) {
+                    let quote = String(afterKeyword.first!)
+                    let withoutFirst = String(afterKeyword.dropFirst())
+                    if let endQuoteRange = withoutFirst.range(of: quote) {
+                        let query = String(withoutFirst[..<endQuoteRange.lowerBound])
+                        if !query.isEmpty {
+                            return query
+                        }
+                    }
+                }
+
+                // Stop at "in safari" or other boundary words
+                let boundaryWords = [" in safari", " on safari", " please", " now"]
+                var query = afterKeyword
+                for boundary in boundaryWords {
+                    if let boundaryRange = query.lowercased().range(of: boundary) {
+                        query = String(query[..<boundaryRange.lowerBound])
+                    }
+                }
+
+                query = query.trimmingCharacters(in: .whitespaces)
+                if !query.isEmpty && query.count > 2 {
+                    return query
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func handleSystemSettingsCommands(in message: String) {
+        let lower = message.lowercased()
+
+        if lower.contains("wallpaper") || lower.contains("background") {
+            if lower.contains("random") || lower.contains("change") {
+                systemSettings.randomBuiltInWallpaper()
+            } else if lower.contains("settings") {
+                systemSettings.openWallpaperSettings()
+            }
+        } else if lower.contains("system settings") {
+            systemSettings.openSystemSettings()
+        }
+    }
+
+    private func handleNotificationCommands(in message: String) {
+        let lower = message.lowercased()
+
+        if lower.contains("remind") {
+            // Parse "remind me in 5 minutes to do X" or "remind me at 3pm to do X"
+            if lower.contains(" in ") {
+                // Match: 30 sec, 5 min, 10 seconds, 2 minutes, etc.
+                let pattern = #"(\d+)\s*(?:seconds?|secs?|s|minutes?|mins?|m)"#
+                if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                   let match = regex.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)) {
+                    if let numberRange = Range(match.range(at: 1), in: lower),
+                       let fullMatch = Range(match.range, in: lower) {
+                        let number = Int(String(lower[numberRange])) ?? 0
+                        let unit = String(lower[fullMatch.lowerBound..<fullMatch.upperBound]).lowercased()
+
+                        let seconds: TimeInterval
+                        if unit.contains("s") && !unit.contains("m") {
+                            // seconds
+                            seconds = TimeInterval(number)
+                        } else {
+                            // minutes
+                            seconds = TimeInterval(number * 60)
+                        }
+
+                        if let messageStart = lower.range(of: " to ") ?? lower.range(of: " about ") {
+                            let reminder = String(message[messageStart.upperBound...]).trimmingCharacters(in: .whitespaces)
+                            if !reminder.isEmpty {
+                                notifications.remind(message: reminder, after: seconds)
+                            }
+                        }
+                    }
+                }
+            } else if lower.contains(" at ") {
+                // "remind me at 3:30pm to do X"
+                if let timeMatch = extractTime(from: message) {
+                    if let messageStart = lower.range(of: " to ") ?? lower.range(of: " about ") {
+                        let reminder = String(message[messageStart.upperBound...]).trimmingCharacters(in: .whitespaces)
+                        notifications.remindAt(message: reminder, hour: timeMatch.hour, minute: timeMatch.minute)
+                    }
+                }
+            }
+        }
+    }
+
+    private func extractTime(from message: String) -> (hour: Int, minute: Int)? {
+        let pattern = #"(\d{1,2}):(\d{2})\s*(am|pm|AM|PM)"#
+        if let regex = try? NSRegularExpression(pattern: pattern),
+           let match = regex.firstMatch(in: message, range: NSRange(message.startIndex..., in: message)) {
+            let nsString = message as NSString
+            if let hourRange = Range(match.range(at: 1), in: message),
+               let minRange = Range(match.range(at: 2), in: message),
+               let ampmRange = Range(match.range(at: 3), in: message),
+               let hour = Int(String(message[hourRange])),
+               let minute = Int(String(message[minRange])) {
+                let ampm = String(message[ampmRange]).lowercased()
+                var finalHour = hour
+                if ampm == "pm" && hour != 12 {
+                    finalHour += 12
+                } else if ampm == "am" && hour == 12 {
+                    finalHour = 0
+                }
+                return (hour: finalHour, minute: minute)
+            }
+        }
+        return nil
+    }
+
+    private func handleCameraRequest() {
+        print("📷 Camera request from user")
+
+        isLoading = true
+
+        // First request permission
+        camera.requestCameraPermission { granted in
+            print("📷 Permission granted: \(granted)")
+
+            if !granted {
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    self.messages.append(ChatMessage(text: "you didn't give me camera access 😢", isUser: false))
+                }
+                return
+            }
+
+            // Start capture
+            self.camera.startCapture()
+
+            // Wait for camera to warm up and capture first frame
+            print("📷 Waiting for first frame...")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                self.camera.captureFrameAsBase64 { base64 in
+                    print("📷 Captured frame, base64 length: \(base64?.count ?? 0)")
+
+                    guard let base64 = base64, !base64.isEmpty else {
+                        DispatchQueue.main.async {
+                            self.isLoading = false
+                            self.messages.append(ChatMessage(text: "camera's not working right now... 📷", isUser: false))
+                        }
+                        return
+                    }
+
+                    // Got a frame!
+                    let cameraPrompt = """
+                    The user asked you to look at them or see them. You have a camera image of them.
+                    React naturally to what you see. Keep it brief (1-2 sentences max).
+                    Comment on their expression, what they're doing, their appearance, or just react emotionally.
+                    """
+
+                    self.openAI.chatWithImage(
+                        image: base64,
+                        message: cameraPrompt,
+                        completion: { response, mood in
+                            DispatchQueue.main.async {
+                                self.isLoading = false
+                                self.messages.append(ChatMessage(text: response, isUser: false))
+                                if let appDelegate = AppDelegate.shared {
+                                    appDelegate.showSpeechBubbleFromChat(text: response, mood: mood)
+                                    // Speak the camera observation out loud
+                                    appDelegate.elevenLabs.speak(response)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 

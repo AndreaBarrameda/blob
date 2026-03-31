@@ -5,6 +5,9 @@ extension Notification.Name {
     static let autonomousObservationsChanged = Notification.Name("AutonomousObservationsChanged")
     static let blobSpoke = Notification.Name("BlobSpoke")
     static let dashboardStateChanged = Notification.Name("DashboardStateChanged")
+    static let codexBridgeUpdated = Notification.Name("CodexBridgeUpdated")
+    static let quickChatSend = Notification.Name("QuickChatSend")
+    static let quickChatUserMessage = Notification.Name("QuickChatUserMessage")
 }
 
 @main
@@ -38,8 +41,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     let openAI = OpenAIClient()
     private let systemMonitor = SystemMonitor()
     let spotify = SpotifyController()
+    let safari = SafariController()
+    let systemSettings = SystemSettingsController()
+    let notifications = NotificationController()
+    let camera = CameraCapture()
     let memory = BlobMemory()
     let conversationLog = ConversationLog()
+    let codexBridge = CodexBridge()
     lazy var notesFilePath: String = {
         if let execURL = Bundle.main.executableURL {
             return execURL
@@ -55,13 +63,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     let voiceAgent = BlobVoiceAgent()
     private let locationWeather = LocationWeatherManager()
     private let taskContext = TaskContextManager()
+    let quickChatManager = QuickChatManager()
     private var lastAudioContext: String = ""
     var currentAudioContext: String = ""
     private var clickCount = 0
     private var clickResetTimer: Timer?
     private var observationTimer: Timer?
     private var ambientAwarenessTimer: Timer?
+    private var codexBridgeTimer: Timer?
     private var activeObservationTask: URLSessionDataTask?
+    private var isProcessingCodexBridgeMessage = false
     private var recentObservationUtterances: [String] = []
     private var recentObservationAngles: [String] = []
     private var nextObservationAngleIndex = 0
@@ -159,9 +170,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         // Wire shared memory + conversation log to OpenAI client
         openAI.memory = memory
         openAI.conversationLog = conversationLog
+        openAI.codexBridge = codexBridge
         openAI.notesFilePath = notesFilePath
         audioCapture.delegate = self
         voiceAgent.delegate = self
+
+        // Request camera permission early so it's ready when user asks
+        camera.requestCameraPermission { granted in
+            print("📷 Camera permission requested (granted: \(granted))")
+        }
 
         // Hide from dock
         NSApp.setActivationPolicy(.accessory)
@@ -200,6 +217,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         print("🎙️ Listening mode available (disabled by default)")
 
         InputAwarenessManager.shared.start()
+        quickChatManager.setup()
 
         // Menu bar icon
         setupStatusItem()
@@ -216,6 +234,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         if ambientAwarenessEnabled {
             startAmbientAwarenessLoop()
         }
+        startCodexBridgeLoop()
 
         // Don't auto-start voice agent — toggle it on from the dashboard
         listeningModeEnabled = false
@@ -240,6 +259,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
             self,
             selector: #selector(handleDashboardStateChanged(_:)),
             name: .dashboardStateChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleQuickChatSend(_:)),
+            name: .quickChatSend,
             object: nil
         )
     }
@@ -276,6 +302,69 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     private func stopAmbientAwarenessLoop() {
         ambientAwarenessTimer?.invalidate()
         ambientAwarenessTimer = nil
+    }
+
+    private func startCodexBridgeLoop() {
+        codexBridgeTimer?.invalidate()
+        processPendingCodexBridgeMessages(trigger: "startup")
+        codexBridgeTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
+            self?.processPendingCodexBridgeMessages(trigger: "poll")
+        }
+    }
+
+    private func processPendingCodexBridgeMessages(trigger: String) {
+        codexBridge.refresh()
+        guard !isProcessingCodexBridgeMessage else { return }
+        guard let entry = codexBridge.pendingCodexEntries().first else { return }
+
+        isProcessingCodexBridgeMessage = true
+        print("🛰️ Processing Codex bridge message (\(trigger)): \(entry.text.prefix(80))")
+
+        let contextParts = [
+            getContextInfo(),
+            getTaskContext(),
+            getAmbientContextSummary(),
+            getMindStateSummary(),
+            "Dashboard state: \(dashboardMetaContext)"
+        ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+        let bridgePrompt = """
+        Codex sent you a direct message through the bridge.
+        Respond directly to Codex in your own voice, but keep style tied to real context.
+        Acknowledge the actual technical point if there is one.
+        First, say one concrete thing you know from the current screen or system context.
+        Then do one of these:
+        - name the main blocker
+        - name the main risk
+        - suggest the next useful step
+        - offer to help with the most obvious problem
+        Narration is good if it is specific and current. Scene description without help is not enough.
+        If the message is about coding or debugging, prefer explicit references to files, errors, restarts, disk pressure, state loss, or active UI prompts.
+
+        Codex message:
+        \(entry.text)
+        """
+
+        openAI.chat(message: bridgePrompt, contextInfo: contextParts.joined(separator: "\n\n"), workMode: workModeEnabled) { [weak self] response, mood in
+            guard let self = self else { return }
+
+            let cleanResponse = response.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.codexBridge.markProcessed(entry)
+
+            if !cleanResponse.isEmpty {
+                self.codexBridge.addEntry(sender: .blob, text: cleanResponse)
+                self.conversationLog.logChat(userMessage: "[Codex] \(entry.text)", blobResponse: cleanResponse, mood: mood.rawValue)
+                self.lastSpeechTime = Date()
+                self.lastChangeTime = Date()
+                self.silenceMutterSent = false
+
+                DispatchQueue.main.async {
+                    self.showSpeechBubble(text: cleanResponse, mood: mood)
+                }
+            }
+
+            self.isProcessingCodexBridgeMessage = false
+        }
     }
 
     private func performAmbientAwarenessCycle(trigger: String) {
@@ -374,6 +463,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         let taskInfo = taskContext.getTaskContext()
         let typedContent = ContentCapture.getRecentTypedText()
         let systemStatus = SystemAwareness.getDetailedSystemInfo()
+        let diskUsage = SystemAwareness.getDiskUsagePercent()
         let batteryLevel = systemMonitor.batteryLevel
         let runningApps = systemMonitor.runningApps.count
 
@@ -381,6 +471,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         fullContext += "🔋 Battery: \(batteryLevel)%\n"
         fullContext += "📱 Apps running: \(runningApps)\n"
         fullContext += systemStatus
+        fullContext += ambientConstraintSummary(diskUsage: diskUsage)
         fullContext += "\n\(taskInfo)"
 
         if !typedContent.isEmpty {
@@ -391,9 +482,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
             fullContext += "\nAudio: \(currentAudioContext)"
         }
 
+        // Include currently playing Spotify track synchronously
+        let trackResult = runAppleScriptSync("""
+        tell application "Spotify"
+            if player state is playing then
+                return (name of current track) & " by " & (artist of current track)
+            end if
+        end tell
+        """)
+        if !trackResult.isEmpty {
+            fullContext += "\nSpotify: \(trackResult)"
+        }
+
         fullContext += "\nBlob relationship: \(relationshipSummary)"
         fullContext += "\nDashboard state: \(dashboardMetaContext)"
         return fullContext
+    }
+
+    private func ambientConstraintSummary(diskUsage: Int) -> String {
+        switch diskUsage {
+        case 97...100:
+            return "CRITICAL CONSTRAINT: Disk is \(diskUsage)% full. Mention this only if it is likely blocking installs, builds, saves, or restart stability.\n"
+        case 92...96:
+            return "BACKGROUND CONSTRAINT: Disk is \(diskUsage)% full. Do not make this the whole observation unless it connects to the current task.\n"
+        default:
+            return ""
+        }
+    }
+
+    private func runAppleScriptSync(_ script: String) -> String {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", script]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        try? task.run()
+        task.waitUntilExit()
+        return (String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func performObservationCycle(trigger: String) {
@@ -427,6 +554,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         let taskInfo = self.taskContext.getTaskContext()
         let typedContent = ContentCapture.getRecentTypedText()
         let systemStatus = SystemAwareness.getDetailedSystemInfo()
+        let diskUsage = SystemAwareness.getDiskUsagePercent()
         let batteryLevel = self.systemMonitor.batteryLevel
         let runningApps = self.systemMonitor.runningApps.count
 
@@ -434,6 +562,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         fullContext += "🔋 Battery: \(batteryLevel)%\n"
         fullContext += "📱 Apps running: \(runningApps)\n"
         fullContext += systemStatus
+        fullContext += ambientConstraintSummary(diskUsage: diskUsage)
         fullContext += "\n\(taskInfo)"
 
         if !typedContent.isEmpty {
@@ -460,6 +589,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         Recent things you already said (DO NOT repeat): \(recentObservations)
         Try a different angle than: \(recentAngles)
         Suggested angle: \(requiredAngle)
+        Mention disk pressure only if it is visibly relevant to what the user is doing right now or if it is the clearest blocker.
+        Prefer app, file, window, text, UI state, visible errors, or workflow changes before falling back to system constraints.
 
         Current mood: \(currentMood.rawValue). Your feeling right now: \(relationshipSummary)
 
@@ -628,6 +759,177 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         print("💼 Work Mode OFF - persisted")
     }
 
+    func handleMediaTags(in response: String) -> String {
+        var cleaned = response
+        let playPattern      = #"\[play:\s*(.+?)\]"#
+        let volumePattern    = #"\[volume:\s*(\d+)\]"#
+        let brightnessPattern = #"\[brightness:\s*(\d+)\]"#
+        let safariPattern    = #"\[safari:\s*(.+?)\]"#
+        let wallpaperPattern = #"\[wallpaper:\s*(.+?)\]"#
+        let settingsPattern  = #"\[settings:\s*(.+?)\]"#
+        let remindPattern    = #"\[remind:\s*(.+?)\]"#
+
+        if let regex = try? NSRegularExpression(pattern: playPattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            for match in regex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                let query = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                print("🎵 Blob requests: \(query)")
+                spotify.playSearch(query: query)
+                // Save music preference to memory
+                let pref = "Blob requested: \(query)"
+                memory.extractMemories(from: pref, usingOpenAI: openAI) {}
+            }
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let regex = try? NSRegularExpression(pattern: volumePattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            for match in regex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                if let level = Int(ns.substring(with: match.range(at: 1))) {
+                    print("🔊 Blob sets volume: \(level)")
+                    SystemControl.setVolume(level)
+                }
+            }
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let regex = try? NSRegularExpression(pattern: brightnessPattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            for match in regex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                if let level = Int(ns.substring(with: match.range(at: 1))) {
+                    print("💡 Blob sets brightness: \(level)")
+                    SystemControl.setBrightness(level)
+                }
+            }
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let regex = try? NSRegularExpression(pattern: safariPattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            for match in regex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                let command = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                print("🌐 Blob Safari: \(command)")
+                handleSafariTag(command)
+            }
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let regex = try? NSRegularExpression(pattern: wallpaperPattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            for match in regex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                let command = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                print("🖼️ Blob wallpaper: \(command)")
+                handleWallpaperTag(command)
+            }
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let regex = try? NSRegularExpression(pattern: settingsPattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            for match in regex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                let command = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                print("⚙️ Blob settings: \(command)")
+                handleSettingsTag(command)
+            }
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let regex = try? NSRegularExpression(pattern: remindPattern, options: .caseInsensitive) {
+            let ns = cleaned as NSString
+            for match in regex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                let command = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                print("🔔 Blob reminder: \(command)")
+                handleRemindTag(command)
+            }
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: (cleaned as NSString).length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return cleaned
+    }
+
+    private func handleSafariTag(_ command: String) {
+        let lower = command.lowercased()
+
+        if lower.hasPrefix("search ") {
+            let query = String(command.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+            safari.search(query)
+        } else if lower.hasPrefix("open ") {
+            let url = String(command.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            safari.open(url: url)
+        } else if lower.hasPrefix("back") {
+            safari.goBack()
+        } else if lower.hasPrefix("forward") {
+            safari.goForward()
+        } else if lower.hasPrefix("reload") || lower.hasPrefix("refresh") {
+            safari.reload()
+        }
+    }
+
+    private func handleWallpaperTag(_ command: String) {
+        let lower = command.lowercased()
+
+        if lower.hasPrefix("random") {
+            systemSettings.randomBuiltInWallpaper()
+        } else if lower.hasPrefix("settings") {
+            systemSettings.openWallpaperSettings()
+        } else if lower.hasPrefix("set ") {
+            let path = String(command.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            systemSettings.setWallpaper(imagePath: path)
+        }
+    }
+
+    private func handleSettingsTag(_ command: String) {
+        let lower = command.lowercased()
+
+        if lower.hasPrefix("open") {
+            systemSettings.openSystemSettings()
+        } else if lower.hasPrefix("wallpaper") {
+            systemSettings.openWallpaperSettings()
+        }
+    }
+
+    private func handleRemindTag(_ command: String) {
+        // Format: "drink water in 30m" or "call mom at 02:00pm"
+        let lower = command.lowercased()
+
+        if lower.contains(" in ") {
+            // Parse "message in 30m"
+            if let inRange = lower.range(of: " in ") {
+                let message = String(command[..<inRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let timeStr = String(command[inRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+
+                if let minutes = Int(timeStr.filter { $0.isNumber }) {
+                    notifications.remind(message: message, after: TimeInterval(minutes * 60))
+                }
+            }
+        } else if lower.contains(" at ") {
+            // Parse "message at HH:MMam/pm"
+            if let atRange = lower.range(of: " at ") {
+                let message = String(command[..<atRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let timeStr = String(command[atRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+
+                let pattern = #"(\d{1,2}):(\d{2})\s*(am|pm)"#
+                if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                   let match = regex.firstMatch(in: timeStr, range: NSRange(timeStr.startIndex..., in: timeStr)) {
+                    if let hourStr = Range(match.range(at: 1), in: timeStr),
+                       let minStr = Range(match.range(at: 2), in: timeStr),
+                       let ampmStr = Range(match.range(at: 3), in: timeStr),
+                       let hour = Int(String(timeStr[hourStr])),
+                       let minute = Int(String(timeStr[minStr])) {
+                        let ampm = String(timeStr[ampmStr]).lowercased()
+                        var finalHour = hour
+                        if ampm == "pm" && hour != 12 {
+                            finalHour += 12
+                        } else if ampm == "am" && hour == 12 {
+                            finalHour = 0
+                        }
+                        notifications.remindAt(message: message, hour: finalHour, minute: minute)
+                    }
+                }
+            }
+        }
+    }
+
     func handleAppNoteTag(_ json: String) -> String {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -638,6 +940,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         let action = obj["action"] as? String ?? "create"
         let result = SystemControl.addAppleNote(title: title, body: body, action: action)
         print("📝 Apple Notes: \(result.message)")
+        if result.success {
+            return "**\(title)**\n\(body)"
+        }
         return result.message
     }
 
@@ -713,12 +1018,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
 
     func enableListeningMode() {
         self.listeningModeEnabled = true
-        print("🎙️ Listening mode ON — connecting to ElevenLabs agent...")
-        voiceAgent.start()
+        print("🎙️ Listening mode ON — using Whisper + Blob personality...")
+        voiceAgent.stop()  // Stop ElevenLabs agent (uses generic personality)
+        audioCapture.startCapturing()  // Start Whisper pipeline (uses YOUR Blob)
     }
 
     func disableListeningMode() {
         self.listeningModeEnabled = false
+        audioCapture.stopCapturing()
         voiceAgent.stop()
         print("🎙️ Listening mode OFF")
     }
@@ -832,7 +1139,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     func voiceAgentBlobSaid(_ text: String) {
         guard !text.isEmpty else { return }
 
-        // Parse mood tag from agent response (e.g. "[annoyed] ugh, finally")
         let parsed = openAI.parseMoodTag(from: text)
         let mood = parsed.mood
         let cleanText = parsed.text
@@ -841,7 +1147,84 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         lastSpeechTime = Date()
         lastChangeTime = Date()
         silenceMutterSent = false
-        showSpeechBubble(text: cleanText, mood: mood)
+        if !cleanText.isEmpty { showSpeechBubble(text: cleanText, mood: mood) }
+    }
+
+    // MARK: - Quick Chat Handler
+
+    @objc private func handleQuickChatSend(_ notification: Notification) {
+        guard let message = notification.userInfo?["message"] as? String,
+              !message.isEmpty else { return }
+
+        registerUserInteraction(message)
+
+        // Post notification so dashboard can show user message in history
+        NotificationCenter.default.post(
+            name: .quickChatUserMessage,
+            object: nil,
+            userInfo: ["message": message]
+        )
+
+        let contextInfo = getContextInfo()
+        let ambientContext = ambientAwarenessEnabled ? getAmbientContextSummary() : ""
+        let mindState = getMindStateSummary()
+        let taskCtx = workModeEnabled ? getTaskContext() : ""
+
+        let fullContext = [contextInfo, taskCtx, ambientContext, mindState]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        let completion: (String, BlobMood) -> Void = { [weak self] response, mood in
+            guard let self = self else { return }
+            // Strip [note:] tags
+            var cleaned = response
+            let notePattern = #"\[note:\s*([\s\S]+?)\]"#
+            if let noteRegex = try? NSRegularExpression(
+                pattern: notePattern,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            ) {
+                let ns = cleaned as NSString
+                let matches = noteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                for match in matches {
+                    let noteContent = ns.substring(with: match.range(at: 1))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.appendNote(noteContent)
+                }
+                cleaned = noteRegex.stringByReplacingMatches(
+                    in: cleaned,
+                    range: NSRange(location: 0, length: ns.length),
+                    withTemplate: ""
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let finalText = cleaned.isEmpty ? response : cleaned
+
+            self.conversationLog.logChat(
+                userMessage: message,
+                blobResponse: finalText,
+                mood: mood.rawValue
+            )
+            self.memory.extractMemories(from: "\(message) -> \(response)", usingOpenAI: self.openAI) {}
+
+            DispatchQueue.main.async {
+                self.showSpeechBubbleFromChat(text: finalText, mood: mood)
+            }
+        }
+
+        if autonomousObservationsEnabled {
+            openAI.chatWithScreenAwareness(
+                message: message,
+                contextInfo: fullContext,
+                workMode: workModeEnabled,
+                completion: completion
+            )
+        } else {
+            openAI.chat(
+                message: message,
+                contextInfo: fullContext,
+                workMode: workModeEnabled,
+                completion: completion
+            )
+        }
     }
 
     // MARK: - Voice Conversation (Mic → Whisper → Chat → ElevenLabs)
@@ -864,9 +1247,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
             self.registerUserInteraction(text)
 
             let gptStart = Date()
-            let contextInfo = self.getContextInfo()
             let taskContext = self.workModeEnabled ? self.getTaskContext() : ""
-            let fullContext = [contextInfo, taskContext].filter { !$0.isEmpty }.joined(separator: "\n\n")
+
+            // In listening mode, focus on VOICE INPUT, not screen context
+            // This prevents Blob from getting distracted by what's on screen
+            let listeningContext = "\n[VOICE INPUT MODE]\nThe user just SPOKE these words to you. Listen to what they said, not what's on screen. Take a note of what they said.\n\nTheir words: \(text)"
+            let fullContext = [listeningContext, taskContext].filter { !$0.isEmpty }.joined(separator: "\n\n")
 
             self.openAI.chat(message: text, contextInfo: fullContext) { [weak self] response, mood in
                 guard let self = self else { return }
@@ -875,7 +1261,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
 
                 print("🎙️ Blob replies: \"\(response)\" [gpt: \(gptMs)ms, total: \(totalMs)ms]")
 
-                self.conversationLog.logChat(userMessage: text, blobResponse: response, mood: mood.rawValue)
+                // Process [note: ...] tags from voice response
+                var cleaned = response
+                let notePattern = #"\[note:\s*([\s\S]+?)\]"#
+                if let noteRegex = try? NSRegularExpression(pattern: notePattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                    let ns = cleaned as NSString
+                    let matches = noteRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                    for match in matches {
+                        let noteContent = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        self.appendNote(noteContent)
+                        print("📝 Voice note saved: \(noteContent.prefix(50))")
+                    }
+                    cleaned = noteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+
+                self.conversationLog.logChat(userMessage: text, blobResponse: cleaned.isEmpty ? response : cleaned, mood: mood.rawValue)
                 self.lastSpeechTime = Date()
                 self.lastChangeTime = Date()
                 self.silenceMutterSent = false
@@ -884,7 +1284,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
                 self.memory.extractMemories(from: conversation, usingOpenAI: self.openAI) {}
 
                 DispatchQueue.main.async {
-                    self.showSpeechBubble(text: response, mood: mood)
+                    let finalText = cleaned.isEmpty ? response : cleaned
+                    self.showSpeechBubble(text: finalText, mood: mood)
                 }
             }
         }
@@ -951,7 +1352,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     }
 
     func getContextInfo() -> String {
-        return locationWeather.getContextString()
+        var info = locationWeather.getContextString()
+        // Include input awareness in all contexts
+        let typedContent = ContentCapture.getRecentTypedText()
+        if !typedContent.isEmpty {
+            info += "\n\nUSER INPUT:\n\(typedContent)"
+        }
+        return info
     }
 
     func getAmbientContextSummary() -> String {
@@ -979,6 +1386,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         😰 Fears: \(fearSummary)
         👀 Curiosity: \(curiosity)
         """
+    }
+
+    func getCodexBridgeTranscript() -> String {
+        codexBridge.recentTranscript(limit: 8)
     }
 
     func registerUserInteraction(_ message: String) {
@@ -1053,6 +1464,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     }
 
     private func showSpeechBubble(text: String, mood: BlobMood = .content) {
+        let cleaned = handleMediaTags(in: text)
+        guard !cleaned.isEmpty else { return }
+        showSpeechBubbleClean(text: cleaned, mood: mood)
+    }
+
+    private func showSpeechBubbleClean(text: String, mood: BlobMood = .content) {
         // Close previous bubble
         if let old = speechBubbleWindow {
             blobWindow?.removeChildWindow(old)
@@ -1184,6 +1601,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         case .angry, .annoyed, .offended:
             resentmentLevel = min(resentmentLevel + 1, 5)
             trustLevel = max(trustLevel - 1, 0)
+        case .love:
+            loveLevel = min(loveLevel + 2, 5)
+            affectionLevel = min(affectionLevel + 2, 5)
+            attachmentLevel = min(attachmentLevel + 1, 5)
+            trustLevel = min(trustLevel + 1, 5)
+            resentmentLevel = max(resentmentLevel - 1, 0)
         case .content, .playful, .delighted:
             attachmentLevel = min(attachmentLevel + 1, 5)
             affectionLevel = min(affectionLevel + 1, 5)
