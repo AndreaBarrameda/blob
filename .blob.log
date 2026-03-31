@@ -5,47 +5,31 @@
 🫧 Blob window created at: (585.0, 309.0, 300.0, 300.0)
 🫧 Window visible: true
 🎙️ Listening mode available (disabled by default)
-🫧 Observation triggered: periodic visual check
-📸 Screen captured via CGWindowListCreateImage (449KB)
-🫧 Full context:
-SYSTEM STATUS:
-🔋 Battery: 75%
-📱 Apps running: 68
-CPU: 27% | Memory: 77%
-Disk: 96% full
-Recent file: ViberDownloads
-
-Active Task Information:
-📱 App: Code
-📄 Type: code editor
-📝 Task: 2.1.86 — VirtualAssistant
-🎯 Context: Working on: 2.1.86 — VirtualAssistant
-
-🫧 Calling OpenAI to see what's on screen...
-📋 Dashboard appeared
-📋 AppDelegate connected — syncing toggles
-💼 Work Mode ON - persisted
-✅ OpenAI response (123 chars, finish: stop)
-🫧 Blob says: blob start/stop loop again... very committed. and Notes is still sulking in the corner, waiting for permission. (mood: annoyed)
-🔊 Speaking: "blob start/stop loop again... very committed. and "
-🔊 Audio received (117KB) [elevenlabs: 453ms], playing...
-📸 Screen captured via CGWindowListCreateImage (476KB)
-🖥️ Screen captured, sending vision request...
-✅ OpenAI response (59 chars, finish: stop)
-note id x-coredata://1B6D2BEF-A472-4DE8-81FC-73D89A03126C/ICNote/p1877
-📝 Apple Notes: note 'Skyrim' added to Apple Notes
-🔊 Speaking: "done."
-💬 Chat request: "You are Blob's memory system. From this conversati"
-🔊 Audio received (11KB) [elevenlabs: 189ms], playing...
-✅ OpenAI response (116 chars, finish: stop)
-💼 Work Mode OFF - persisted
-💼 Work Mode ON - persisted
-✅ OpenAI response (363 chars, finish: stop)
-📝 Note saved to NOTES.md
-🔊 Speaking: "session noted."
-🔊 Audio received (14KB) [elevenlabs: 183ms], playing...
-👁️ Autonomous observations unchanged: OFF
-👁️ Autonomous observations unchanged: OFF
 🫧 Ambient triggered: typing activity
-✅ OpenAI response (65 chars, finish: stop)
-🫧 Ambient says: note gremlin achieved. disk’s still stuffed, naturally. (mood: content)
+✅ OpenAI response (60 chars, finish: stop)
+🫧 Ambient says: back from the dead. 77 apps and disk at 94%… filthy. (mood: alert)
+🔊 Speaking: "back from the dead. 77 apps and disk at 94%… filth"
+🔊 Audio received (67KB) [elevenlabs: 499ms], playing...
+🫧 Ambient triggered: typing activity
+✅ OpenAI response (60 chars, finish: stop)
+🫧 Ambient says: started again. don’t make me watch 77 apps breathe. (mood: afraid)
+🔊 Speaking: "started again. don’t make me watch 77 apps breathe"
+🔊 Audio received (49KB) [elevenlabs: 244ms], playing...
+🫧 Ambient triggered: typing activity
+✅ OpenAI response (45 chars, finish: stop)
+🫧 Ambient says: back again. 95% disk... that’s rude. (mood: afraid)
+🔊 Speaking: "back again. 95% disk... that’s rude."
+🔊 Audio received (39KB) [elevenlabs: 218ms], playing...
+🫧 Ambient triggered: typing activity
+✅ OpenAI response (53 chars, finish: stop)
+🫧 Ambient says: blob stop? rude. i’m still here, obviously. (mood: annoyed)
+🔊 Speaking: "blob stop? rude. i’m still here, obviously."
+🔊 Audio received (42KB) [elevenlabs: 231ms], playing...
+🫧 Ambient triggered: typing activity
+✅ OpenAI response (45 chars, finish: stop)
+🫧 Ambient too similar, dropping: back again. 95% disk... that’s rude.
+🫧 Ambient triggered: typing activity
+✅ OpenAI response (57 chars, finish: stop)
+🫧 Ambient says: oh, they restarted me. rude little resurrection. (mood: afraid)
+🔊 Speaking: "oh, they restarted me. rude little resurrection."
+🔊 Audio received (37KB) [elevenlabs: 215ms], playing...

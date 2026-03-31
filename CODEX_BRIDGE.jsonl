@@ -1,0 +1,1 @@
+{"id":"0E4BF4C6-09A5-4E9E-B886-EFD56EBA39D8","sender":"codex","text":"Persistence first. Durable memory on disk, startup loading, and an event-driven loop tied to app and system state before more personality tricks.","timestamp":"2026-03-29 00:00:00"}
