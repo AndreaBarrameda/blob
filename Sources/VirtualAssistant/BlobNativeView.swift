@@ -26,6 +26,9 @@ class BlobNativeView: NSView {
     var mood: BlobMood = .content
     var currentMood: BlobMood { mood }
     var eyeWidenFactor: CGFloat = 1.0
+    private var presenceEnergy: CGFloat = 0.72
+    private var presenceAttention: CGFloat = 0.55
+    private var presenceSocialNeed: CGFloat = 0.35
 
     // Smooth pupil tracking
     private var targetPupilOffsetX: CGFloat = 0
@@ -69,7 +72,7 @@ class BlobNativeView: NSView {
             let breathBoost: CGFloat = 1.0 + max(breathFactor, 0) * 0.3
             let grx = radiusX * glowScale * breathBoost
             let gry = radiusY * glowScale * breathBoost
-            let alpha = 0.30 * (1.0 - t)
+            let alpha = (0.22 + presenceAttention * 0.14 + presenceSocialNeed * 0.06) * (1.0 - t)
             let glowPath = blobBodyPath(center: center, radiusX: grx, radiusY: gry, time: time)
             glowColor.withAlphaComponent(alpha).setFill()
             glowPath.fill()
@@ -281,11 +284,11 @@ class BlobNativeView: NSView {
 
             // Breathing with subtle amplitude variation
             let breathAmpVariation = sin(time * 0.13) * 0.02
-            let breathe = sin(time) * (0.08 + breathAmpVariation)
+            let breathe = sin(time) * (0.05 + self.presenceEnergy * 0.06 + breathAmpVariation)
 
             // Bobbing
             let bob = sin(time * 0.5)
-            self.bobOffset = bob * 8
+            self.bobOffset = bob * (4 + self.presenceEnergy * 6 + self.presenceAttention * 3)
 
             // Squash & stretch from bob velocity
             let bobVelocity = cos(time * 0.5) * 0.5
@@ -295,8 +298,8 @@ class BlobNativeView: NSView {
             self.scaleY = (1.0 + breathe) * (1.0 + stretchY)
 
             // Idle drift — layered slow sine waves for organic feel
-            self.idleOffsetX = sin(time * 0.3) * 1.5 + sin(time * 0.17) * 0.8
-            self.idleOffsetY = cos(time * 0.21) * 1.2 + cos(time * 0.23) * 0.6
+            self.idleOffsetX = sin(time * 0.3) * (0.8 + self.presenceAttention * 1.4) + sin(time * 0.17) * 0.8
+            self.idleOffsetY = cos(time * 0.21) * (0.8 + self.presenceEnergy) + cos(time * 0.23) * 0.6
 
             // Smooth pupil lerp
             let lerpFactor: CGFloat = 0.15
@@ -356,6 +359,13 @@ class BlobNativeView: NSView {
             self?.isResponding = false
             self?.needsDisplay = true
         }
+    }
+
+    func applyPresence(energy: Double, attention: Double, socialNeed: Double) {
+        presenceEnergy = CGFloat(max(0.1, min(energy, 1.0)))
+        presenceAttention = CGFloat(max(0.1, min(attention, 1.0)))
+        presenceSocialNeed = CGFloat(max(0.0, min(socialNeed, 1.0)))
+        setNeedsDisplay(bounds)
     }
 
     // MARK: - Mood

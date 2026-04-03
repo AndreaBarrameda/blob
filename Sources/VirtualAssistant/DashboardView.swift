@@ -22,6 +22,8 @@ struct DashboardView: View {
     @State private var mindStateInfo = ""
     @State private var codexBridgeInfo = ""
     @State private var showSystemControl = false
+    @State private var showFileOrganizer = false
+    @StateObject private var fileOrganizer = FileOrganizerManager()
     @State private var chatTimeoutTimer: Timer?
     @State private var panelPinned = true
     @State private var panelOpacity: Double = 1.0
@@ -520,6 +522,31 @@ struct DashboardView: View {
             }
             .border(Color.gray.opacity(0.3), width: 0.5)
 
+            // File Organizer section
+            VStack(spacing: 0) {
+                Button(action: { showFileOrganizer.toggle() }) {
+                    HStack {
+                        Image(systemName: showFileOrganizer ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.purple)
+                        Text("File Organizer")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.purple)
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(Color(red: 0.96, green: 0.94, blue: 1.0))
+                }
+                .buttonStyle(.plain)
+
+                if showFileOrganizer {
+                    FileOrganizerView(organizer: fileOrganizer)
+                        .border(Color.gray.opacity(0.3), width: 0.5)
+                }
+            }
+            .border(Color.gray.opacity(0.3), width: 0.5)
+
             // Spotify controls
             VStack(spacing: 8) {
                 HStack(spacing: 6) {
@@ -992,6 +1019,7 @@ struct DashboardView: View {
         let notePattern     = #"\[note:\s*([\s\S]+?)\]"#
         let calendarPattern = #"\[calendar:\s*(\{[\s\S]+?\})\]"#
         let appNotePattern  = #"\[appnote:\s*(\{[\s\S]+?\})\]"#
+        let organizePattern = #"\[organize:\s*(.+?)\]"#
         let wrappedCompletion: (String, BlobMood) -> Void = { response, mood in
             var cleaned = response
             var didHandle = false
@@ -1069,6 +1097,29 @@ struct DashboardView: View {
                         }
                     }
                     cleaned = appNoteRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+
+            // Handle [organize: <path>] — all modes
+            if let organizeRegex = try? NSRegularExpression(pattern: organizePattern, options: .caseInsensitive) {
+                let ns = cleaned as NSString
+                let matches = organizeRegex.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+                if !matches.isEmpty {
+                    didHandle = true
+                    for match in matches {
+                        var rawPath = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        // Expand ~
+                        if rawPath.hasPrefix("~") {
+                            rawPath = NSHomeDirectory() + rawPath.dropFirst()
+                        }
+                        let targetPath = rawPath
+                        DispatchQueue.main.async {
+                            showFileOrganizer = true
+                            fileOrganizer.scan(directory: targetPath, openAI: openAI)
+                            messages.append(ChatMessage(text: "scanning \(targetPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))...", isUser: false))
+                        }
+                    }
+                    cleaned = organizeRegex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
                 }
             }
 

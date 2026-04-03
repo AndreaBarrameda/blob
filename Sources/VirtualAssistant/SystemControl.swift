@@ -96,6 +96,26 @@ class SystemControl {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    static func setVolume(_ volume: Int) {
+        let clamped = max(0, min(volume, 100))
+        let script = "set volume output volume \(clamped)"
+        _ = runAppleScript(script)
+    }
+
+    static func setBrightness(_ level: Int) {
+        let clamped = max(0, min(level, 100))
+        let normalized = Double(clamped) / 100.0
+        let script = """
+        tell application "System Events"
+            tell appearance preferences
+                set dark mode to dark mode
+            end tell
+        end tell
+        do shell script "/usr/bin/brightness \(normalized)"
+        """
+        _ = runAppleScript(script)
+    }
+
     // MARK: - Apple Notes
 
     /// action: "create" | "append" | "replace"
@@ -241,6 +261,21 @@ class SystemControl {
         // fallback without seconds
         fmt.formatOptions = [.withFullDate, .withTime]
         return fmt.date(from: iso)
+    }
+
+    @discardableResult
+    private static func runAppleScript(_ script: String) -> Bool {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", script]
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+            return task.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
 }

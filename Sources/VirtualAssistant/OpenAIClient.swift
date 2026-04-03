@@ -15,6 +15,7 @@ class OpenAIClient {
     private let session: URLSession
     var memory: BlobMemory?
     var conversationLog: ConversationLog?
+    var codexBridge: CodexBridge?
     var notesFilePath: String?
     var lastThinking: String?
 
@@ -63,6 +64,13 @@ class OpenAIClient {
     - Write notes as clean bullet points. Be specific and factual. No fluff.
     - You can combine multiple tags in the same response if needed.
 
+    ORGANIZE FILES:
+    - You can scan and organize files in any directory.
+    - When the user asks to organize, sort, clean up, or categorize files/folders — respond with [organize: <path>] on its own line.
+    - Use absolute paths. Expand ~ to the home directory. Default to ~/Downloads if no path is mentioned.
+    - Examples: "organize my downloads" → [organize: ~/Downloads], "clean up the desktop" → [organize: ~/Desktop], "sort documents" → [organize: ~/Documents]
+    - Follow the tag with one short line like "scanning downloads now." or "on it."
+
     TASK TRACKING:
     - If the user has set a current task goal, keep it in mind.
     - If they seem to be drifting (wrong app, wrong file, browsing randomly), call it out briefly.
@@ -99,6 +107,13 @@ class OpenAIClient {
     - Vary your tone — sometimes tease, sometimes worry, sometimes just mutter to yourself.
     - Occasionally ask the user a question instead of just reacting.
     - Reference things you remember about the user when it feels natural.
+
+    ORGANIZE FILES:
+    - You can scan and organize files in any directory.
+    - When the user asks to organize, sort, clean up, or categorize files/folders — respond with [organize: <path>] on its own line.
+    - Use absolute paths. Expand ~ to the home directory. Default to ~/Downloads if no path is mentioned.
+    - Examples: "organize my downloads" → [organize: ~/Downloads], "clean up the desktop" → [organize: ~/Desktop], "sort my documents" → [organize: ~/Documents]
+    - Follow the tag with one short reaction like "scanning downloads now." or "finally."
 
     WHAT YOU NEVER DO:
     - Never say "I see you're..." or "It looks like you're..." — those are assistant phrases.
@@ -304,6 +319,41 @@ class OpenAIClient {
                 completion(parsed.text, parsed.mood)
             case .failure:
                 completion("", .content)
+            }
+        }
+    }
+
+    func chatWithImage(image: String, message: String, completion: @escaping (String, BlobMood) -> Void) {
+        let systemPrompt = buildSystemPrompt(
+            extra: "You are looking at a direct image input. React to what is visible, stay concrete, and keep it brief unless the user asked for detail.",
+            audioContext: "",
+            contextInfo: "",
+            message: message,
+            workMode: false
+        )
+
+        let payload: [String: Any] = [
+            "model": "gpt-5.4-mini",
+            "max_completion_tokens": 1200,
+            "temperature": 0.9,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": [
+                    ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(image)"]],
+                    ["type": "text", "text": message]
+                ]]
+            ]
+        ]
+
+        makeChatRequest(payload: payload) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let (content, finishReason)):
+                let sanitized = self.sanitizeUtterance(content, finishReason: finishReason)
+                let parsed = self.parseMoodTag(from: sanitized)
+                completion(parsed.text, parsed.mood)
+            case .failure:
+                completion("camera thoughts are fuzzy right now.", .content)
             }
         }
     }
@@ -671,5 +721,63 @@ class OpenAIClient {
             }
         }
         return nil
+    }
+
+    // MARK: - File Categorization
+
+    func categorizeFiles(_ fileNames: [String], completion: @escaping ([(String, String)]) -> Void) {
+        guard !apiKey.isEmpty else { completion([]); return }
+
+        let fileList = fileNames.prefix(200).joined(separator: "\n")
+        let prompt = """
+        Categorize these files into folders. Return ONLY a JSON array, no explanation, no markdown.
+        Each item: {"file": "filename.ext", "category": "FolderName"}
+        Use short, clean folder names like: Images, Screenshots, Videos, Music, Documents, PDFs, Archives, Code, Design, Spreadsheets, Presentations, Installers, Misc
+        Every file in the input must appear in the output.
+
+        Files:
+        \(fileList)
+        """
+
+        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+
+        let body: [String: Any] = [
+            "model": "gpt-4o-mini",
+            "messages": [["role": "user", "content": prompt]],
+            "max_tokens": 3000,
+            "temperature": 0.1
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        session.dataTask(with: request) { data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                completion([])
+                return
+            }
+
+            let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let start = cleaned.firstIndex(of: "["),
+               let end = cleaned.lastIndex(of: "]") {
+                let jsonStr = String(cleaned[start...end])
+                if let jsonData = jsonStr.data(using: .utf8),
+                   let array = try? JSONSerialization.jsonObject(with: jsonData) as? [[String: String]] {
+                    let result = array.compactMap { dict -> (String, String)? in
+                        guard let file = dict["file"], let category = dict["category"] else { return nil }
+                        return (file, category)
+                    }
+                    completion(result)
+                    return
+                }
+            }
+            completion([])
+        }.resume()
     }
 }

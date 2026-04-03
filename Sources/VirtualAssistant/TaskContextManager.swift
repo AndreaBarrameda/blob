@@ -23,6 +23,39 @@ class TaskContextManager {
         parseAppSpecificContext()
     }
 
+    func captureActivityState(inputSummary: String = "", currentGoal: String = "") -> ActivityState {
+        updateContext()
+
+        var evidence: [String] = []
+        if !currentApp.isEmpty { evidence.append("frontmost app \(currentApp)") }
+        if !windowTitle.isEmpty { evidence.append("window title \(windowTitle)") }
+        if !currentTask.isEmpty { evidence.append("task \(currentTask)") }
+        if !terminalContext.isEmpty { evidence.append("terminal transcript") }
+        if !inputSummary.isEmpty { evidence.append("recent input") }
+
+        let browserContext = fileType == "browser" ? currentTask : ""
+        let inferredProject = inferredProjectName()
+        let focusSummary = inferredFocusSummary(browserContext: browserContext, currentGoal: currentGoal)
+        let confidence = inferredConfidence(browserContext: browserContext, inputSummary: inputSummary)
+
+        return ActivityState(
+            observedAt: Date(),
+            frontmostApp: currentApp,
+            windowTitle: windowTitle,
+            fileType: fileType,
+            currentTask: currentTask,
+            projectContext: projectContext,
+            terminalContext: terminalContext,
+            typedSnippet: trimmedSnippet(inputSummary, limit: 180),
+            browserContext: browserContext,
+            currentGoal: currentGoal,
+            focusSummary: focusSummary,
+            inferredProject: inferredProject,
+            confidence: confidence,
+            evidence: evidence
+        )
+    }
+
     private func updateWindowTitle() {
         guard let activeApp = NSWorkspace.shared.frontmostApplication else {
             windowTitle = ""
@@ -113,6 +146,53 @@ class TaskContextManager {
             currentTask = windowTitle
             projectContext = "Browsing: \(windowTitle)"
         }
+    }
+
+    private func inferredProjectName() -> String {
+        if !projectContext.isEmpty {
+            return projectContext
+                .replacingOccurrences(of: "Working on: ", with: "")
+                .replacingOccurrences(of: "Browsing: ", with: "")
+        }
+        if !windowTitle.isEmpty {
+            return trimmedSnippet(windowTitle, limit: 80)
+        }
+        return ""
+    }
+
+    private func inferredFocusSummary(browserContext: String, currentGoal: String) -> String {
+        if !currentGoal.isEmpty {
+            return currentGoal
+        }
+        if !terminalContext.isEmpty && !currentTask.isEmpty {
+            return "working in \(currentTask)"
+        }
+        if !currentTask.isEmpty {
+            return currentTask
+        }
+        if !browserContext.isEmpty {
+            return "reading \(browserContext)"
+        }
+        if !windowTitle.isEmpty {
+            return trimmedSnippet(windowTitle, limit: 90)
+        }
+        return currentApp
+    }
+
+    private func inferredConfidence(browserContext: String, inputSummary: String) -> Double {
+        var confidence = 0.25
+        if !currentApp.isEmpty { confidence += 0.15 }
+        if !windowTitle.isEmpty { confidence += 0.15 }
+        if !currentTask.isEmpty { confidence += 0.2 }
+        if !browserContext.isEmpty || !terminalContext.isEmpty { confidence += 0.15 }
+        if !inputSummary.isEmpty { confidence += 0.1 }
+        return min(confidence, 0.95)
+    }
+
+    private func trimmedSnippet(_ value: String, limit: Int) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit))
     }
 
     func getTaskContext() -> String {

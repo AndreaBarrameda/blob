@@ -7,6 +7,53 @@
 **Status:** Complete | **Next:** Push when ready
 --Claude
 
+### 2026-04-03 20:06:41 - Fix invisible text in FileOrganizerView (elevenlabs-integration)
+**What:** Changed file/category text colors from `.primary` → explicit `.black` / `Color(white: 0.4/0.6)`. Added `.background(Color.white)` to ScrollView. `.primary` was resolving to near-white in this context.
+**Why:** User reported text unreadable — white text on white background in the file list
+**Result:** Build complete. Text now explicitly dark regardless of color scheme context.
+**References:** FileOrganizerView.swift:88-98 (category), :103-107 (filename), :130 (background)
+**Related:** 2026-04-03 02:59:31 - File Organizer feature
+**Status:** Complete | **Next:** blob restart
+--Claude
+
+### 2026-04-03 03:12:56 - Fix "Couldn't categorize files" bug (elevenlabs-integration)
+**What:** Two fixes to FileOrganizerManager:
+1. Case-insensitive filename matching — GPT returns names slightly differently, `files.contains()` was rejecting all of them
+2. Extension-based fallback categorization — any file GPT misses (or if GPT fails entirely) gets categorized by extension: Screenshots, Images, Videos, PDFs, Documents, Code, etc. Screenshot files detected by name prefix.
+**Why:** User ran "organize my desktop" and got "Couldn't categorize files." — 100+ desktop files, GPT likely returned partial/variant names
+**Result:** Build complete. Now always produces results — GPT for smart naming, extension fallback as safety net.
+**References:** FileOrganizerManager.swift:51-87 (matching + fallback), :106-140 (categoryByExtension)
+**Related:** 2026-04-03 02:59:31 - File Organizer feature
+**Status:** Complete | **Next:** User to restart and retry
+--Claude
+
+### 2026-04-03 03:05:21 - File Organizer chat command integration (elevenlabs-integration)
+**What:** Wired file organizer to chat via `[organize: <path>]` tag
+1. `OpenAIClient.swift` — added ORGANIZE FILES section to both `workModePersonality` and `personality` so Blob emits `[organize: ~/Desktop]` etc.
+2. `DashboardView.swift` — added `organizePattern` regex + handler in `wrappedCompletion`: expands `~`, calls `fileOrganizer.scan()`, auto-opens panel, shows "scanning..." chat message
+3. `FileOrganizerManager.swift` — added `@Published var currentDirectory` so path set by chat is reflected in the view
+4. `FileOrganizerView.swift` — changed `@StateObject` → `@ObservedObject`, removed local `selectedDirectory` state, uses `organizer.currentDirectory` throughout
+5. `DashboardView.swift` — lifted `FileOrganizerManager` to `@StateObject private var fileOrganizer`, passes to `FileOrganizerView(organizer: fileOrganizer)`
+**Why:** User wanted to say "organize my desktop" / "organize my downloads" in chat and have Blob do it — triggered by seeing screenshot-covered desktop
+**Result:** Build complete. "organize my desktop" → Blob scans ~/Desktop, opens panel with categorized plan, user confirms and moves.
+**References:** DashboardView.swift:1025-1044 (organize tag handler), OpenAIClient.swift:72-79 (workMode), :119-127 (personality)
+**Related:** 2026-04-03 02:59:31 - File Organizer base feature
+**Status:** Complete | **Next:** Test with real desktop/downloads
+--Claude
+
+### 2026-04-03 02:59:31 - File Organizer feature (elevenlabs-integration)
+**What:** New file organizer — scans a directory, uses GPT-4o-mini to categorize files, shows preview with checkboxes, moves files into subfolders, supports undo.
+1. `FileOrganizerManager.swift` (new) — scan dir, call GPT, execute moves with FileManager, undo log
+2. `FileOrganizerView.swift` (new) — SwiftUI UI: directory picker, file plan grouped by category, checkboxes, Move/Rescan/Undo buttons
+3. `OpenAIClient.swift:684` — added `categorizeFiles(_ fileNames:)` method using gpt-4o-mini, returns JSON array of {file, category}
+4. `DashboardView.swift:24,521` — added `showFileOrganizer` state + collapsible "File Organizer" section (purple, after System Control)
+**Why:** User requested Blob be able to organize files — scan, categorize, and clean up directories
+**Result:** Build complete. Dashboard has new File Organizer section. Defaults to ~/Downloads. Pick folder → Scan & Categorize → preview plan → Move files → Undo if needed.
+**References:** FileOrganizerManager.swift (new), FileOrganizerView.swift (new), OpenAIClient.swift:684, DashboardView.swift:25,544
+**Related:** None (first entry for this topic)
+**Status:** Complete | **Next:** Test with real Downloads folder
+--Claude
+
 ### 2026-03-31 18:19:00 - Fix Quick Chat panel sizing (elevenlabs-integration)
 **What:** Added `.frame(width: 550, height: 68)` to `QuickChatView.body` HStack — `NSHostingController` was shrinking panel to TextField's tiny intrinsic width, ignoring `contentRect` passed to `super.init()`
 **Why:** Root cause: `NSHostingController` overrides window size with SwiftUI view's intrinsic content size; `TextField` default width is ~100pt, collapsing the panel

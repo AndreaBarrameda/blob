@@ -78,6 +78,10 @@ class SystemAwareness {
         return Int((Double(used) / Double(totalSpace)) * 100)
     }
 
+    static func getDiskUsagePercent() -> Int {
+        getDiskUsage()
+    }
+
     private static func isNetworkActive() -> Bool {
         let networkApps = ["Safari", "Chrome", "Firefox", "Mail", "Discord", "Slack", "Telegram"]
         if let frontApp = NSWorkspace.shared.frontmostApplication {

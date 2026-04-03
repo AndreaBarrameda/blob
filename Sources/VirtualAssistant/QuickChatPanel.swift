@@ -1,31 +1,48 @@
 import Cocoa
 import SwiftUI
 
+/// Shared state for the reusable Quick Chat panel.
+final class QuickChatViewModel: ObservableObject {
+    @Published var inputText = ""
+    @Published var isLoading = false
+    @Published private(set) var focusToken = UUID()
+
+    func prepareForDisplay() {
+        isLoading = false
+        inputText = ""
+        requestFocus()
+    }
+
+    func requestFocus() {
+        focusToken = UUID()
+    }
+}
+
 /// Manages the Quick Chat popup panel lifecycle and global hotkey monitoring.
 final class QuickChatManager {
+    private let viewModel = QuickChatViewModel()
     private var panel: QuickChatNSPanel?
     private var globalHotkeyMonitor: Any?
     private var localHotkeyMonitor: Any?
 
     func setup() {
-        // Global monitor: fires when Blob is NOT the frontmost app
+        // Global monitor: fires when Blob is not the frontmost app.
         globalHotkeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEvent(event)
         }
-        // Local monitor: fires when Blob IS the frontmost app
-        // (allows toggle-hide when panel is key)
+
+        // Local monitor: fires when Blob is frontmost, including when the panel is key.
         localHotkeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if self?.handleKeyEvent(event) == true {
-                return nil  // consume the event
+                return nil
             }
             return event
         }
     }
 
-    /// Returns true if the event was consumed (Cmd+Shift+Space)
+    /// Returns true if the event was consumed.
     @discardableResult
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
-        // Cmd+Shift+Space: keyCode 49, modifierFlags contains .command and .shift
         guard event.keyCode == 49,
               event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command, .shift]
         else { return false }
@@ -37,7 +54,7 @@ final class QuickChatManager {
     }
 
     func togglePanel() {
-        if let panel = panel, panel.isVisible {
+        if let panel, panel.isVisible {
             hidePanel()
         } else {
             showPanel()
@@ -46,35 +63,40 @@ final class QuickChatManager {
 
     private func showPanel() {
         let existingPanel = panel ?? makePanel()
-        self.panel = existingPanel
+        panel = existingPanel
 
-        // Position near mouse cursor, clamped to screen
         let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main!
-        let panelWidth: CGFloat = 550
-        let panelHeight: CGFloat = 68
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
+        let targetScreen = screen ?? NSScreen.screens.first
+        let panelWidth: CGFloat = 528
+        let panelHeight: CGFloat = 56
         let margin: CGFloat = 16
+
+        guard let targetScreen else { return }
 
         var x = mouseLocation.x - panelWidth / 2
         var y = mouseLocation.y + margin
 
-        // Clamp to screen bounds
-        x = max(screen.visibleFrame.minX + margin, min(x, screen.visibleFrame.maxX - panelWidth - margin))
-        if y + panelHeight > screen.visibleFrame.maxY - margin {
-            y = mouseLocation.y - panelHeight - margin  // flip below cursor
+        x = max(targetScreen.visibleFrame.minX + margin, min(x, targetScreen.visibleFrame.maxX - panelWidth - margin))
+        if y + panelHeight > targetScreen.visibleFrame.maxY - margin {
+            y = mouseLocation.y - panelHeight - margin
         }
 
+        viewModel.prepareForDisplay()
         existingPanel.setFrameOrigin(NSPoint(x: x, y: y))
+        NSApp.activate(ignoringOtherApps: true)
         existingPanel.makeKeyAndOrderFront(nil)
+        existingPanel.orderFrontRegardless()
     }
 
     private func hidePanel() {
+        viewModel.prepareForDisplay()
         panel?.orderOut(nil)
-        panel?.resetInputText()
     }
 
     private func makePanel() -> QuickChatNSPanel {
         let contentView = QuickChatView(
+            viewModel: viewModel,
             onSubmit: { [weak self] text in
                 self?.hidePanel()
                 NotificationCenter.default.post(
@@ -82,156 +104,133 @@ final class QuickChatManager {
                     object: nil,
                     userInfo: ["message": text]
                 )
-            },
-            onDismiss: { [weak self] in
-                self?.hidePanel()
             }
         )
-        return QuickChatNSPanel(contentView: contentView)
+
+        return QuickChatNSPanel(
+            rootView: contentView
+        ) { [weak self] in
+            self?.hidePanel()
+        }
     }
 }
 
 /// NSPanel subclass for the Quick Chat popup.
 final class QuickChatNSPanel: NSPanel {
-    var quickChatTextField: NSTextField? {
-        findTextField(in: contentView)
-    }
+    private let onEscape: () -> Void
 
-    func resetInputText() {
-        quickChatTextField?.stringValue = ""
-    }
+    init(rootView: QuickChatView, onEscape: @escaping () -> Void) {
+        self.onEscape = onEscape
 
-    init(contentView: QuickChatView) {
-        let hostingController = NSHostingController(rootView: contentView)
+        let hostingController = NSHostingController(rootView: rootView)
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 550, height: 68),
+            contentRect: NSRect(x: 0, y: 0, width: 528, height: 56),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
-        self.contentViewController = hostingController
-        self.isOpaque = false
-        self.backgroundColor = NSColor.clear
-        self.level = .floating
-        self.isReleasedWhenClosed = false
-        self.hidesOnDeactivate = false
-        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        self.hasShadow = true
-        self.isMovableByWindowBackground = true
+
+        contentViewController = hostingController
+        isOpaque = false
+        backgroundColor = .clear
+        level = .floating
+        isReleasedWhenClosed = false
+        hidesOnDeactivate = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        hasShadow = true
+        isMovableByWindowBackground = true
     }
 
-    // Required for text input to work in a borderless panel
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func findTextField(in view: NSView?) -> NSTextField? {
-        guard let view = view else { return nil }
-        if let tf = view as? NSTextField { return tf }
-        for sub in view.subviews {
-            if let found = findTextField(in: sub) { return found }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape()
+            return
         }
-        return nil
+        super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError()
     }
 }
 
 /// SwiftUI view for the Quick Chat popup.
 struct QuickChatView: View {
-    @State private var inputText = ""
+    @ObservedObject var viewModel: QuickChatViewModel
     @FocusState private var isInputFocused: Bool
-    @State private var isLoading = false
 
     let onSubmit: (String) -> Void
-    let onDismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Blob indicator dot
+        HStack(spacing: 10) {
             Circle()
-                .fill(Color(red: 0.62, green: 0.9, blue: 1.0))
-                .frame(width: 14, height: 14)
+                .fill(Color(red: 0.58, green: 0.82, blue: 0.94))
+                .frame(width: 10, height: 10)
 
-            TextField("Ask Blob...", text: $inputText)
+            TextField("Ask Blob...", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 17, weight: .regular))
-                .foregroundColor(.white)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundColor(.white.opacity(0.95))
                 .focused($isInputFocused)
-                .onSubmit {
-                    submit()
-                }
-                .disabled(isLoading)
+                .onSubmit(submit)
+                .disabled(viewModel.isLoading)
 
-            if isLoading {
+            if viewModel.isLoading {
                 ProgressView()
-                    .scaleEffect(0.8)
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-            } else if !inputText.isEmpty {
+                    .scaleEffect(0.72)
+                    .progressViewStyle(.circular)
+                    .tint(.white.opacity(0.8))
+            } else if !viewModel.inputText.isEmpty {
                 Button(action: submit) {
                     Image(systemName: "paperplane.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.8))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.65))
                 }
                 .buttonStyle(.plain)
             }
         }
-        .frame(width: 550, height: 68)
-        .padding(.horizontal, 20)
+        .frame(width: 528, height: 56)
+        .padding(.horizontal, 16)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(red: 0.12, green: 0.12, blue: 0.14))
-                .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 4)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(red: 0.13, green: 0.13, blue: 0.15).opacity(0.98))
+                .shadow(color: .black.opacity(0.24), radius: 9, x: 0, y: 3)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.05), lineWidth: 0.75)
         )
         .onAppear {
-            // Small delay ensures the panel is key before focusing
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                isInputFocused = true
-            }
+            requestFocusSoon()
         }
-        .background(KeyEventHandlerView(onEscape: onDismiss))
+        .onChange(of: viewModel.focusToken) { _ in
+            requestFocusSoon()
+        }
+    }
+
+    private func requestFocusSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            isInputFocused = true
+        }
     }
 
     private func submit() {
-        let text = inputText.trimmingCharacters(in: .whitespaces)
+        let text = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        inputText = ""
-        isLoading = true
-        // Brief spinner, then dismiss; actual response arrives via .blobSpoke
+
+        viewModel.isLoading = true
+        viewModel.inputText = ""
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            isLoading = false
+            viewModel.isLoading = false
             onSubmit(text)
-        }
-    }
-}
-
-/// NSViewRepresentable for handling Escape key in the Quick Chat panel.
-struct KeyEventHandlerView: NSViewRepresentable {
-    let onEscape: () -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = EscapeListenerNSView()
-        view.onEscape = onEscape
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-/// NSView subclass that listens for Escape key (keyCode 53).
-class EscapeListenerNSView: NSView {
-    var onEscape: (() -> Void)?
-
-    override var acceptsFirstResponder: Bool { false }
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {   // Escape
-            onEscape?()
-        } else {
-            super.keyDown(with: event)
         }
     }
 }

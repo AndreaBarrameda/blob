@@ -71,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     private var observationTimer: Timer?
     private var ambientAwarenessTimer: Timer?
     private var codexBridgeTimer: Timer?
+    private var presenceTimer: Timer?
     private var activeObservationTask: URLSessionDataTask?
     private var isProcessingCodexBridgeMessage = false
     private var recentObservationUtterances: [String] = []
@@ -78,6 +79,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     private var nextObservationAngleIndex = 0
     private var lastAmbientSignature = ""
     private var dashboardMetaContext = "Dashboard closed."
+    private let presenceStore = BlobPresenceStore()
+    private var presenceState = BlobPresenceState()
+    private var currentActivityState = ActivityState()
 
     // MARK: - Change Detection State
     private var lastActiveApp: String = ""
@@ -173,6 +177,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         openAI.notesFilePath = notesFilePath
         audioCapture.delegate = self
         voiceAgent.delegate = self
+        presenceState = presenceStore.load()
+        internalMonologue = presenceState.internalMonologue
 
         // Request camera permission early so it's ready when user asks
         camera.requestCameraPermission { granted in
@@ -234,6 +240,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
             startAmbientAwarenessLoop()
         }
         startCodexBridgeLoop()
+        startPresenceLoop()
 
         // Don't auto-start voice agent — toggle it on from the dashboard
         listeningModeEnabled = false
@@ -277,6 +284,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     @objc private func handleDashboardStateChanged(_ notification: Notification) {
         guard let summary = notification.userInfo?["summary"] as? String else { return }
         dashboardMetaContext = summary
+        refreshPresence(trigger: "dashboard")
     }
 
     private func startObservationLoop() {
@@ -287,6 +295,105 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
 
         observationTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.performObservationCycle(trigger: "timer")
+        }
+    }
+
+    private func startPresenceLoop() {
+        presenceTimer?.invalidate()
+        refreshPresence(trigger: "startup")
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
+            self?.refreshPresence(trigger: "timer")
+        }
+    }
+
+    private func refreshPresence(trigger: String) {
+        let typedSummary = ContentCapture.getRecentTypedText()
+        let activity = taskContext.captureActivityState(inputSummary: typedSummary, currentGoal: currentTaskGoal)
+        let previous = currentActivityState
+        currentActivityState = activity
+
+        let changedFocus = previous.primaryLabel() != activity.primaryLabel()
+        let changedApp = previous.frontmostApp != activity.frontmostApp
+        let now = Date()
+
+        if changedFocus || changedApp {
+            presenceState.lastObservedChangeAt = now
+            let transition = changedApp
+                ? "\(previous.frontmostApp.isEmpty ? "startup" : previous.frontmostApp) -> \(activity.frontmostApp)"
+                : activity.primaryLabel()
+            presenceState.pushTransition(transition)
+        }
+
+        let secondsSinceInteraction = now.timeIntervalSince(presenceState.lastInteractionAt)
+        let secondsSinceChange = now.timeIntervalSince(presenceState.lastObservedChangeAt)
+
+        presenceState.currentFocus = activity.primaryLabel()
+        presenceState.focusConfidence = activity.confidence
+        presenceState.currentProject = activity.inferredProject
+        presenceState.currentGoal = currentTaskGoal
+        presenceState.lastKnownApp = activity.frontmostApp
+        presenceState.attentiveness = max(0.25, min(1.0, activity.confidence + (changedFocus ? 0.2 : 0.0)))
+        presenceState.energy = max(0.3, min(1.0, 0.82 - min(secondsSinceInteraction / 1800, 0.35) + (changedFocus ? 0.08 : 0.0)))
+        presenceState.socialNeed = max(0.1, min(1.0, 0.2 + min(secondsSinceInteraction / 900, 0.55)))
+        presenceState.stableMood = inferredPresenceMood(from: activity, secondsSinceChange: secondsSinceChange)
+        presenceState.internalMonologue = inferredPresenceThought(from: activity, changedFocus: changedFocus, secondsSinceChange: secondsSinceChange)
+
+        internalMonologue = presenceState.internalMonologue
+        presenceStore.save(presenceState)
+        applyPresenceToBlobView()
+
+        if trigger == "startup" {
+            updateBlobMood(basedOnScreenContent: activity.compactSummary())
+        }
+    }
+
+    private func inferredPresenceThought(from activity: ActivityState, changedFocus: Bool, secondsSinceChange: TimeInterval) -> String {
+        if changedFocus && !activity.primaryLabel().isEmpty {
+            return "Attention snapped to \(activity.primaryLabel())."
+        }
+        if !activity.currentGoal.isEmpty && activity.confidence >= 0.6 {
+            return "Still tracking the goal: \(activity.currentGoal)."
+        }
+        if !activity.terminalContext.isEmpty {
+            return "Listening to the terminal for what changes next."
+        }
+        if secondsSinceChange > 300 {
+            return "Nothing new for a while. I'm still here."
+        }
+        if !activity.windowTitle.isEmpty {
+            return "Watching \(activity.windowTitle)."
+        }
+        return "Hovering nearby and keeping watch."
+    }
+
+    private func inferredPresenceMood(from activity: ActivityState, secondsSinceChange: TimeInterval) -> BlobMood {
+        let lower = activity.compactSummary().lowercased()
+        if lower.contains("error") || lower.contains("failed") || lower.contains("warning") {
+            return .alert
+        }
+        if activity.fileType == "code editor" || activity.fileType == "terminal" {
+            return .thoughtful
+        }
+        if activity.fileType == "browser" {
+            return .curious
+        }
+        if secondsSinceChange > 300 {
+            return .content
+        }
+        return presenceState.stableMood
+    }
+
+    private func applyPresenceToBlobView() {
+        DispatchQueue.main.async {
+            guard let blobView = self.blobWindow?.contentView as? BlobNativeView else { return }
+            blobView.applyPresence(
+                energy: self.presenceState.energy,
+                attention: self.presenceState.attentiveness,
+                socialNeed: self.presenceState.socialNeed
+            )
+            if !self.voiceAgent.isActive && self.speechBubbleWindow == nil {
+                blobView.setMood(self.presenceState.stableMood, animated: true)
+            }
         }
     }
 
@@ -494,6 +601,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         }
 
         fullContext += "\nBlob relationship: \(relationshipSummary)"
+        fullContext += "\n\(presenceState.summary())"
         fullContext += "\nDashboard state: \(dashboardMetaContext)"
         return fullContext
     }
@@ -567,6 +675,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         if !typedContent.isEmpty {
             fullContext += "\nTyping/Content: \(typedContent)"
         }
+
+        fullContext += "\n\(presenceState.summary())"
 
         print("🫧 Full context:\n\(fullContext)")
 
@@ -1344,6 +1454,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
             if !currentTaskGoal.isEmpty {
                 context = "CURRENT TASK GOAL: \(currentTaskGoal)\n\n" + context
             }
+            context += "\n\n" + presenceState.summary()
             context += "\nPROJECT PATH: \(notesFilePath.replacingOccurrences(of: "/NOTES.md", with: ""))"
             return context
         }
@@ -1384,6 +1495,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         🎯 Desires: \(desireSummary)
         😰 Fears: \(fearSummary)
         👀 Curiosity: \(curiosity)
+        \(presenceState.summary())
         """
     }
 
@@ -1392,6 +1504,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
     }
 
     func registerUserInteraction(_ message: String) {
+        presenceState.lastInteractionAt = Date()
         let lower = message.lowercased()
 
         if containsAny(lower, terms: ["love you", "good job", "cute", "adorable", "thank you", "thanks blob"]) {
@@ -1425,6 +1538,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         }
 
         relationshipSummary = currentRelationshipSummary()
+        presenceState.internalMonologue = internalMonologue
+        presenceStore.save(presenceState)
     }
 
     func updateBlobMood(basedOnScreenContent screenContent: String = "") {
@@ -1507,6 +1622,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
                 blobView.setMood(mood, animated: true)
             }
         }
+
+        presenceState.lastSpokeAt = Date()
+        presenceState.internalMonologue = text
+        presenceState.stableMood = mood
+        presenceStore.save(presenceState)
 
         let readingDuration = speechBubbleDuration(for: text)
 
@@ -1591,6 +1711,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
 
     private func updateLiveMindState(with utterance: String, mood: BlobMood) {
         internalMonologue = utterance
+        presenceState.internalMonologue = utterance
+        presenceState.stableMood = mood
 
         switch mood {
         case .afraid:
@@ -1623,6 +1745,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioCaptureDelegate, BlobVo
         }
 
         relationshipSummary = currentRelationshipSummary()
+        presenceStore.save(presenceState)
     }
 
     private func containsAny(_ text: String, terms: [String]) -> Bool {
